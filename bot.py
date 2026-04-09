@@ -16,6 +16,13 @@ OWNER_ID = 7416252489
 allowed_users = {OWNER_ID}
 chat_settings = {}
 
+# --- Функция отправки уведомления владельцу ---
+async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str):
+    try:
+        await context.bot.send_message(chat_id=OWNER_ID, text=f"✅ {text}")
+    except:
+        pass
+
 # --- Парсинг времени ---
 def parse_time(time_str: str) -> int | None:
     match = re.match(r"(\d+)\s*(час|часа|часов|минут|минуты|минуту|день|дня|дней)", time_str.lower())
@@ -58,6 +65,7 @@ async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if target_id:
         allowed_users.add(target_id)
         await update.message.reply_text(f"✅ Доступ выдан пользователю {target_id}")
+        await notify_owner(context, f"Доступ выдан пользователю {target_id}")
     else:
         await update.message.reply_text("❌ Не удалось определить пользователя. Ответьте на его сообщение или укажите ID.")
 
@@ -65,38 +73,57 @@ async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id):
         return
-    
-    if not update.message.reply_to_message:
-        await update.message.reply_text("Команду нужно писать в ответ на сообщение")
-        return
 
     text = update.message.text.strip()
     parts = text.split()
     
-    count_to_delete = 1
-    
-    if len(parts) > 1:
+    # Если это просто !дел без числа
+    if len(parts) == 1:
+        # Если нет ответа на сообщение
+        if not update.message.reply_to_message:
+            await update.message.reply_text("Команду !дел без числа нужно писать в ответ на сообщение")
+            return
+        # Удаляем команду + сообщение на которое ответили
+        count_to_delete = 1
+        target_msg_id = update.message.reply_to_message.message_id
+    else:
+        # !дел с числом - удаляем N сообщений выше команды
         try:
             count_to_delete = int(parts[1])
         except ValueError:
-            pass
+            return
+        # Начинаем с сообщения перед командой
+        target_msg_id = update.message.message_id - 1
 
-    try:
-        await update.message.delete()
-    except:
-        pass
-
-    target_msg_id = update.message.reply_to_message.message_id
     chat_id = update.effective_chat.id
+    command_msg_id = update.message.message_id
 
-    msg_ids = list(range(target_msg_id, target_msg_id + count_to_delete))
+    # Собираем ID сообщений для удаления
+    if len(parts) == 1:
+        # Для !дел без числа: удаляем команду + целевое сообщение
+        msg_ids = [target_msg_id, command_msg_id]
+    else:
+        # Для !дел N: удаляем N сообщений выше + команду
+        # target_msg_id - это ID сообщения перед командой
+        # идём вниз на count_to_delete сообщений
+        start_id = target_msg_id - count_to_delete + 1
+        if start_id < 0:
+            start_id = 0
+        msg_ids = list(range(start_id, target_msg_id + 1))
+        msg_ids.append(command_msg_id)
     
+    # Удаляем пачками по 100
     for i in range(0, len(msg_ids), 100):
         chunk = msg_ids[i:i+100]
         try:
             await context.bot.delete_messages(chat_id, chunk)
         except:
-            pass
+            # Если пачкой не удалось - удаляем по одному
+            for msg_id in chunk:
+                try:
+                    await context.bot.delete_message(chat_id, msg_id)
+                except:
+                    pass
 
 # --- -стикеры N ---
 async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,6 +152,8 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     chat_settings[chat_id]["sticker_limit"] = limit
     chat_settings[chat_id]["user_sticker_counter"] = {}
+    
+    await notify_owner(context, f"Лимит стикеров установлен: {limit}")
 
 # --- триггер стикеры ---
 async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,6 +180,7 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
     if punishment_line == "бан":
         chat_settings[chat_id]["sticker_punishment"] = "ban"
         chat_settings[chat_id]["sticker_punishment_duration"] = None
+        await notify_owner(context, "Триггер стикеров: наказание — бан")
     elif punishment_line.startswith("мут"):
         time_match = re.search(r"мут\s+(.+)", punishment_line)
         if time_match:
@@ -159,6 +189,7 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
             if seconds:
                 chat_settings[chat_id]["sticker_punishment"] = "mute"
                 chat_settings[chat_id]["sticker_punishment_duration"] = seconds
+                await notify_owner(context, f"Триггер стикеров: наказание — мут {time_str}")
 
 # --- Проверка стикеров ---
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -185,6 +216,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if settings["sticker_punishment"] == "ban":
             try:
                 await context.bot.ban_chat_member(chat_id, user_id)
+                await notify_owner(context, f"Пользователь {user_id} забанен за {limit} стикеров подряд")
             except:
                 pass
         elif settings["sticker_punishment"] == "mute":
@@ -200,6 +232,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     },
                     until_date=until_date
                 )
+                await notify_owner(context, f"Пользователь {user_id} замучен за {limit} стикеров подряд")
             except:
                 pass
 
@@ -215,6 +248,7 @@ async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application: Application):
     await application.bot.set_my_commands([])
+    await application.bot.send_message(chat_id=OWNER_ID, text="✅ Бот запущен и готов к работе")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
