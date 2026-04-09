@@ -1,7 +1,9 @@
 import os
 import asyncio
 import re
+import threading
 from datetime import datetime, timedelta
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
@@ -15,6 +17,26 @@ OWNER_ID = 7416252489
 # --- Хранилище данных ---
 allowed_users = {OWNER_ID}
 chat_settings = {}
+
+# --- Фиктивный HTTP-сервер для Railway ---
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+    
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass
+
+def run_dummy_server():
+    port = int(os.getenv('PORT', 8080))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    print(f"HTTP сервер запущен на порту {port}")
+    server.serve_forever()
 
 # --- Функция отправки уведомления владельцу ---
 async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str):
@@ -51,18 +73,14 @@ def get_target_id(update: Update) -> int | None:
         return update.message.reply_to_message.from_user.id
     
     text = update.message.text.strip()
-    # Ищем @username
     match = re.search(r'@(\w+)', text)
     if match:
-        username = match.group(1)
-        # Простой способ - ищем в entities
         if update.message.entities:
             for entity in update.message.entities:
                 if entity.type == "mention" and entity.user:
                     return entity.user.id
         return None
     
-    # Ищем ID в тексте
     match = re.search(r'\b(\d{5,})\b', text)
     if match:
         return int(match.group(1))
@@ -156,7 +174,6 @@ async def cmd_mute_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     
-    # Ищем время после "муты период"
     match = re.search(r'муты период\s+(.+)', text, re.IGNORECASE)
     if not match:
         return
@@ -184,43 +201,32 @@ async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
-    user_id = update.effective_user.id
     
     target_id = get_target_id(update)
     if not target_id:
         await update.message.reply_text("❌ Укажите пользователя (ответом или @username)")
         return
     
-    # Парсим время и причину
-    # Формат: мут [время] @user причина
-    # или: мут @user причина (тогда время по умолчанию)
-    
     duration = None
     reason = ""
     
-    # Проверяем, указано ли время
     time_match = re.match(r'мут\s+(\d+\s*(?:сек|секунд|секунду|минут|минута|минуту|час|часа|часов|день|дня|дней))\s+', text, re.IGNORECASE)
     if time_match:
         time_str = time_match.group(1)
         duration = parse_time(time_str)
-        # Убираем время и "мут" из текста для получения причины
         remaining = text[time_match.end():].strip()
-        # Убираем упоминание пользователя
         remaining = re.sub(r'@\w+', '', remaining).strip()
         reason = remaining if remaining else "Без причины"
     else:
-        # Время не указано, берём по умолчанию
         if chat_id in chat_settings and "mute_settings" in chat_settings[chat_id]:
             duration = chat_settings[chat_id]["mute_settings"].get("default_duration", 3600)
         else:
             duration = 3600
         
-        # Убираем "мут" и упоминание, остальное - причина
         remaining = re.sub(r'^мут\s+', '', text, flags=re.IGNORECASE)
         remaining = re.sub(r'@\w+', '', remaining).strip()
         reason = remaining if remaining else "Без причины"
     
-    # Применяем мут
     until_date = datetime.now() + timedelta(seconds=duration)
     try:
         await context.bot.restrict_chat_member(
@@ -234,7 +240,6 @@ async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
             until_date=until_date
         )
         
-        # Форматируем время для отображения
         if duration >= 86400:
             time_display = f"{duration // 86400} дн."
         elif duration >= 3600:
@@ -444,16 +449,19 @@ async def post_init(application: Application):
     await application.bot.send_message(chat_id=OWNER_ID, text="✅ Бот запущен и готов к работе")
 
 def main():
+    # Запускаем HTTP-сервер в отдельном потоке
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
-    # +бот
     app.add_handler(MessageHandler(
         filters.TEXT & filters.Regex(r'^\+бот'),
         cmd_grant_access
     ))
     
-    # !дел
     app.add_handler(MessageHandler(
         filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), 
         cmd_del
     ))
+    
+    app.add
