@@ -44,10 +44,12 @@ async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id): return
-    text, chat_id, cmd_id = update.message.text.strip(), update.effective_chat.id, update.message.message_id
+    
+    text = update.message.text.strip()
+    chat_id = update.effective_chat.id
+    cmd_id = update.message.message_id
     parts = text.split()
-    try: await context.bot.delete_message(chat_id, cmd_id)
-    except: pass
+    
     if len(parts) == 1:
         if not update.message.reply_to_message:
             msg = await context.bot.send_message(chat_id, "Ответь на сообщение")
@@ -55,20 +57,40 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await msg.delete()
             except: pass
             return
-        msg_ids = [update.message.reply_to_message.message_id]
-    else:
-        try: count = int(parts[1])
-        except: return
-        start_id = cmd_id - count
-        if start_id < 0: start_id = 0
-        msg_ids = list(range(start_id, cmd_id))
+        
+        try:
+            await context.bot.delete_message(chat_id, cmd_id)
+        except: pass
+        
+        try:
+            await context.bot.delete_message(chat_id, update.message.reply_to_message.message_id)
+        except: pass
+        return
+    
+    try:
+        count = int(parts[1])
+    except:
+        return
+    
+    try:
+        await context.bot.delete_message(chat_id, cmd_id)
+    except: pass
+    
+    start_id = cmd_id - count
+    if start_id < 0:
+        start_id = 0
+    msg_ids = list(range(start_id, cmd_id))
+    
     for i in range(0, len(msg_ids), 100):
         chunk = msg_ids[i:i+100]
-        try: await context.bot.delete_messages(chat_id, chunk)
+        try:
+            await context.bot.delete_messages(chat_id, chunk)
         except:
             for mid in chunk:
-                try: await context.bot.delete_message(chat_id, mid)
-                except: pass
+                try:
+                    await context.bot.delete_message(chat_id, mid)
+                except:
+                    pass
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id): return
@@ -76,59 +98,6 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("...")
     end = datetime.now()
     await msg.edit_text(f"{(end - start).total_seconds() * 1000:.0f}ms")
-
-async def cmd_mute_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not has_access(update.effective_user.id): return
-    chat_id = update.effective_chat.id
-    match = re.search(r'муты период\s+(.+)', update.message.text.strip(), re.IGNORECASE)
-    if not match: return
-    sec = parse_time(match.group(1))
-    if not sec: return
-    chat_settings.setdefault(chat_id, {}).setdefault("mute_settings", {})["default_duration"] = sec
-    await update.message.reply_text(f"✅ Период мута по умолчанию: {match.group(1)}")
-
-async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not has_access(update.effective_user.id): return
-    chat_id, text = update.effective_chat.id, update.message.text.strip()
-    target_id, target_name = None, None
-    if update.message.reply_to_message:
-        u = update.message.reply_to_message.from_user
-        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
-    elif update.message.entities:
-        for e in update.message.entities:
-            if e.type == "text_mention" and e.user:
-                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
-                break
-            elif e.type == "mention":
-                username = text[e.offset:e.offset + e.length].lstrip('@')
-                target_name = username
-                try:
-                    member = await context.bot.get_chat_member(chat_id, f"@{username}")
-                    target_id = member.user.id
-                except:
-                    try: target_id = (await context.bot.get_chat(f"@{username}")).id
-                    except: pass
-                break
-    if not target_id:
-        await update.message.reply_text("❌ Пользователь не указан или бот его не видит")
-        return
-    if not target_name: target_name = str(target_id)
-    time_match = re.match(r'мут\s+(\d+\s*(?:сек|секунд|минут|минута|минуту|час|часа|часов|день|дня|дней))\s+', text, re.IGNORECASE)
-    if time_match:
-        duration = parse_time(time_match.group(1))
-    else:
-        duration = chat_settings.get(chat_id, {}).get("mute_settings", {}).get("default_duration", 3600)
-    if duration >= 86400: time_display = f"{duration // 86400} дн."
-    elif duration >= 3600: time_display = f"{duration // 3600} ч."
-    elif duration >= 60: time_display = f"{duration // 60} мин."
-    else: time_display = f"{duration} сек."
-    try:
-        await context.bot.restrict_chat_member(chat_id, target_id,
-            permissions={"can_send_messages": False, "can_send_media": False, "can_send_other": False, "can_add_web_page_previews": False},
-            until_date=datetime.now() + timedelta(seconds=duration))
-        await update.message.reply_text(f"🔇 {target_name} был замучен на {time_display}")
-    except:
-        await update.message.reply_text(f"❌ Не удалось замутить {target_name}")
 
 async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id): return
@@ -193,6 +162,7 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     })
     s["sticker_limit"] = limit
     s["user_sticker_counter"] = {}
+    await update.message.reply_text(f"✅ Лимит стикеров установлен: {limit}")
 
 async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id): return
@@ -268,8 +238,6 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+бот'), cmd_grant_access))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!пинг$'), cmd_ping))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^муты период'), cmd_mute_period))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^мут\b'), cmd_mute))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^анмут\b'), cmd_unmute))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+правила'), cmd_add_rules))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
