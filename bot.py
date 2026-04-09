@@ -300,4 +300,5 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
-    app.add_handler(MessageHandler(filters.Sticker.
+    app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
+   
