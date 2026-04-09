@@ -54,8 +54,6 @@ async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mention = parts[1].replace("@", "")
             if mention.isdigit():
                 target_id = int(mention)
-            else:
-                pass
     
     if target_id:
         allowed_users.add(target_id)
@@ -237,7 +235,7 @@ def main():
     ))
     
     app.add_handler(MessageHandler(
-        filters.TEXT & filters.Regex(r'^триггер стикеры(?:\n|.)+', re.DOTALL), 
+        filters.TEXT & filters.Regex(r'^триггер стикеры'),
         cmd_trigger_stickers
     ))
     
