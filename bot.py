@@ -9,7 +9,6 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 
-# --- Токен ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not set")
@@ -18,7 +17,6 @@ OWNER_ID = 7416252489
 allowed_users = {OWNER_ID}
 chat_settings = {}
 
-# --- HTTP сервер для Railway (запускается первым) ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -33,10 +31,8 @@ class DummyHandler(BaseHTTPRequestHandler):
 def run_server():
     port = int(os.getenv('PORT', 8080))
     print(f"HTTP server starting on port {port}")
-    server = HTTPServer(('0.0.0.0', port), DummyHandler)
-    server.serve_forever()
+    HTTPServer(('0.0.0.0', port), DummyHandler).serve_forever()
 
-# --- Парсинг времени ---
 def parse_time(time_str: str) -> int | None:
     time_str = time_str.lower().strip()
     match = re.match(r"(\d+)\s*(сек|секунд|секунду|секунды)", time_str)
@@ -52,7 +48,6 @@ def parse_time(time_str: str) -> int | None:
 def has_access(user_id: int) -> bool:
     return user_id in allowed_users
 
-# --- Команды ---
 async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID: return
     target_id, target_name = None, None
@@ -291,19 +286,18 @@ async def post_init(app: Application):
     print("Bot started!")
 
 def main():
-    # Запускаем HTTP сервер в отдельном потоке
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
-    
-    # Ждём секунду чтобы сервер точно запустился
+    threading.Thread(target=run_server, daemon=True).start()
     time.sleep(1)
     
-    # Запускаем бота
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+бот'), cmd_grant_access))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!пинг$'), cmd_ping))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^муты период'), cmd_mute_period))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^мут\b'), cmd_mute))
-    app.add_handler(MessageHandler(filters
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^анмут\b'), cmd_unmute))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+правила'), cmd_add_rules))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
+    app.add_handler(MessageHandler(filters.Sticker.
