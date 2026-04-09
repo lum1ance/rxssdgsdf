@@ -7,78 +7,83 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-# --- Токен берётся из переменной окружения ---
+# --- Токен из переменной окружения ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("Не задан BOT_TOKEN в переменных окружения")
+    raise ValueError("BOT_TOKEN not set")
 
 OWNER_ID = 7416252489
 
-# --- Хранилище данных ---
+# --- Хранилище ---
 allowed_users = {OWNER_ID}
 chat_settings = {}
 
-# --- Фиктивный HTTP-сервер для Railway ---
+# --- HTTP сервер для Railway ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is running")
-    
+        self.wfile.write(b"OK")
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
-    
     def log_message(self, format, *args):
         pass
 
-def run_dummy_server():
+def run_server():
     port = int(os.getenv('PORT', 8080))
-    server = HTTPServer(('0.0.0.0', port), DummyHandler)
-    print(f"HTTP сервер запущен на порту {port}")
-    server.serve_forever()
+    HTTPServer(('0.0.0.0', port), DummyHandler).serve_forever()
 
-# --- Функция отправки уведомления владельцу ---
+# --- Уведомление владельцу ---
 async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str):
     try:
-        await context.bot.send_message(chat_id=OWNER_ID, text=f"✅ {text}")
+        await context.bot.send_message(chat_id=OWNER_ID, text=f"OK {text}")
     except:
         pass
 
 # --- Парсинг времени ---
 def parse_time(time_str: str) -> int | None:
-    match = re.match(r"(\d+)\s*(сек|секунд|секунду|минут|минута|минуту|час|часа|часов|день|дня|дней)", time_str.lower())
-    if not match:
-        return None
-    val = int(match.group(1))
-    unit = match.group(2)
+    time_str = time_str.lower().strip()
     
-    if "сек" in unit:
-        return val
-    elif "минут" in unit:
-        return val * 60
-    elif "час" in unit:
-        return val * 3600
-    elif "ден" in unit:
-        return val * 86400
+    # Секунды
+    match = re.match(r"(\d+)\s*(сек|секунд|секунду)", time_str)
+    if match:
+        return int(match.group(1))
+    
+    # Минуты
+    match = re.match(r"(\d+)\s*(минут|минута|минуту)", time_str)
+    if match:
+        return int(match.group(1)) * 60
+    
+    # Часы
+    match = re.match(r"(\d+)\s*(час|часа|часов)", time_str)
+    if match:
+        return int(match.group(1)) * 3600
+    
+    # Дни
+    match = re.match(r"(\d+)\s*(день|дня|дней)", time_str)
+    if match:
+        return int(match.group(1)) * 86400
+    
     return None
 
 # --- Проверка доступа ---
 def has_access(user_id: int) -> bool:
     return user_id in allowed_users
 
-# --- Получение ID пользователя из упоминания или ответа ---
+# --- Получить ID цели ---
 def get_target_id(update: Update) -> int | None:
     if update.message.reply_to_message:
         return update.message.reply_to_message.from_user.id
     
-    text = update.message.text.strip()
+    text = update.message.text
+    if update.message.entities:
+        for entity in update.message.entities:
+            if entity.type == "text_mention" and entity.user:
+                return entity.user.id
+    
     match = re.search(r'@(\w+)', text)
     if match:
-        if update.message.entities:
-            for entity in update.message.entities:
-                if entity.type == "mention" and entity.user:
-                    return entity.user.id
         return None
     
     match = re.search(r'\b(\d{5,})\b', text)
@@ -87,71 +92,62 @@ def get_target_id(update: Update) -> int | None:
     
     return None
 
-# --- Команда +бот (выдать доступ) ---
+# --- +бот ---
 async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    if user_id != OWNER_ID:
+    if update.effective_user.id != OWNER_ID:
         return
     
     target_id = get_target_id(update)
-    
     if target_id:
         allowed_users.add(target_id)
-        await update.message.reply_text(f"✅ Доступ выдан пользователю {target_id}")
-        await notify_owner(context, f"Доступ выдан пользователю {target_id}")
+        await update.message.reply_text(f"OK Доступ выдан {target_id}")
+        await notify_owner(context, f"Доступ выдан {target_id}")
     else:
-        await update.message.reply_text("❌ Не удалось определить пользователя. Ответьте на его сообщение или укажите ID/username.")
+        await update.message.reply_text("Ошибка: не найден пользователь")
 
-# --- !дел и !дел N ---
+# --- !дел ---
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id):
         return
 
     text = update.message.text.strip()
     parts = text.split()
-    
     chat_id = update.effective_chat.id
-    command_msg_id = update.message.message_id
+    cmd_id = update.message.message_id
     
     try:
-        await context.bot.delete_message(chat_id, command_msg_id)
+        await context.bot.delete_message(chat_id, cmd_id)
     except:
         pass
     
     if len(parts) == 1:
         if not update.message.reply_to_message:
-            msg = await context.bot.send_message(
-                chat_id=chat_id, 
-                text="Команду !дел без числа нужно писать в ответ на сообщение"
-            )
+            msg = await context.bot.send_message(chat_id, "Ответь на сообщение")
             await asyncio.sleep(3)
             try:
                 await msg.delete()
             except:
                 pass
             return
-        target_msg_id = update.message.reply_to_message.message_id
-        msg_ids = [target_msg_id]
+        msg_ids = [update.message.reply_to_message.message_id]
     else:
         try:
-            count_to_delete = int(parts[1])
-        except ValueError:
+            count = int(parts[1])
+        except:
             return
-        target_msg_id = command_msg_id - 1
-        start_id = target_msg_id - count_to_delete + 1
+        start_id = cmd_id - count
         if start_id < 0:
             start_id = 0
-        msg_ids = list(range(start_id, target_msg_id + 1))
+        msg_ids = list(range(start_id, cmd_id))
     
     for i in range(0, len(msg_ids), 100):
         chunk = msg_ids[i:i+100]
         try:
             await context.bot.delete_messages(chat_id, chunk)
         except:
-            for msg_id in chunk:
+            for mid in chunk:
                 try:
-                    await context.bot.delete_message(chat_id, msg_id)
+                    await context.bot.delete_message(chat_id, mid)
                 except:
                     pass
 
@@ -160,11 +156,11 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id):
         return
     
-    start_time = datetime.now()
-    msg = await update.message.reply_text("🏓 Пинг...")
-    end_time = datetime.now()
-    ping_ms = (end_time - start_time).total_seconds() * 1000
-    await msg.edit_text(f"🏓 Понг!\n📡 Пинг: {ping_ms:.0f} мс")
+    start = datetime.now()
+    msg = await update.message.reply_text("Ping...")
+    end = datetime.now()
+    ping_ms = (end - start).total_seconds() * 1000
+    await msg.edit_text(f"Pong! {ping_ms:.0f}ms")
 
 # --- муты период ---
 async def cmd_mute_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -178,23 +174,20 @@ async def cmd_mute_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not match:
         return
     
-    time_str = match.group(1).strip()
-    seconds = parse_time(time_str)
-    
+    seconds = parse_time(match.group(1))
     if not seconds:
         return
     
     if chat_id not in chat_settings:
         chat_settings[chat_id] = {}
-    
     if "mute_settings" not in chat_settings[chat_id]:
         chat_settings[chat_id]["mute_settings"] = {}
     
     chat_settings[chat_id]["mute_settings"]["default_duration"] = seconds
-    await update.message.reply_text(f"✅ Время мута по умолчанию: {time_str}")
-    await notify_owner(context, f"Время мута по умолчанию изменено на {time_str}")
+    await update.message.reply_text(f"OK Период мута: {match.group(1)}")
+    await notify_owner(context, f"Период мута изменен на {match.group(1)}")
 
-# --- Мут ---
+# --- мут ---
 async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id):
         return
@@ -204,60 +197,43 @@ async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     target_id = get_target_id(update)
     if not target_id:
-        await update.message.reply_text("❌ Укажите пользователя (ответом или @username)")
+        await update.message.reply_text("Укажи пользователя")
         return
     
     duration = None
-    reason = ""
+    reason = "Без причины"
     
-    time_match = re.match(r'мут\s+(\d+\s*(?:сек|секунд|секунду|минут|минута|минуту|час|часа|часов|день|дня|дней))\s+', text, re.IGNORECASE)
+    time_match = re.match(r'мут\s+(\d+\s*(?:сек|секунд|минут|минута|минуту|час|часа|часов|день|дня|дней))\s+', text, re.IGNORECASE)
     if time_match:
-        time_str = time_match.group(1)
-        duration = parse_time(time_str)
+        duration = parse_time(time_match.group(1))
         remaining = text[time_match.end():].strip()
         remaining = re.sub(r'@\w+', '', remaining).strip()
-        reason = remaining if remaining else "Без причины"
+        if remaining:
+            reason = remaining
     else:
         if chat_id in chat_settings and "mute_settings" in chat_settings[chat_id]:
             duration = chat_settings[chat_id]["mute_settings"].get("default_duration", 3600)
         else:
             duration = 3600
-        
         remaining = re.sub(r'^мут\s+', '', text, flags=re.IGNORECASE)
         remaining = re.sub(r'@\w+', '', remaining).strip()
-        reason = remaining if remaining else "Без причины"
+        if remaining:
+            reason = remaining
     
     until_date = datetime.now() + timedelta(seconds=duration)
     try:
         await context.bot.restrict_chat_member(
             chat_id, target_id,
-            permissions={
-                "can_send_messages": False,
-                "can_send_media": False,
-                "can_send_other": False,
-                "can_add_web_page_previews": False
-            },
+            permissions={"can_send_messages": False, "can_send_media": False,
+                        "can_send_other": False, "can_add_web_page_previews": False},
             until_date=until_date
         )
-        
-        if duration >= 86400:
-            time_display = f"{duration // 86400} дн."
-        elif duration >= 3600:
-            time_display = f"{duration // 3600} ч."
-        elif duration >= 60:
-            time_display = f"{duration // 60} мин."
-        else:
-            time_display = f"{duration} сек."
-        
-        await update.message.reply_text(
-            f"🔇 Пользователь замучен на {time_display}\n"
-            f"📝 Причина: {reason}"
-        )
-        await notify_owner(context, f"Пользователь {target_id} замучен на {time_display}. Причина: {reason}")
-    except Exception as e:
-        await update.message.reply_text("❌ Не удалось замутить пользователя")
+        await update.message.reply_text(f"Mute {target_id}\nReason: {reason}")
+        await notify_owner(context, f"Mute {target_id} reason: {reason}")
+    except:
+        await update.message.reply_text("Error")
 
-# --- Анмут ---
+# --- анмут ---
 async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id):
         return
@@ -266,25 +242,21 @@ async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_id = get_target_id(update)
     
     if not target_id:
-        await update.message.reply_text("❌ Укажите пользователя (ответом или @username)")
+        await update.message.reply_text("Укажи пользователя")
         return
     
     try:
         await context.bot.restrict_chat_member(
             chat_id, target_id,
-            permissions={
-                "can_send_messages": True,
-                "can_send_media": True,
-                "can_send_other": True,
-                "can_add_web_page_previews": True
-            }
+            permissions={"can_send_messages": True, "can_send_media": True,
+                        "can_send_other": True, "can_add_web_page_previews": True}
         )
-        await update.message.reply_text("🔊 Пользователь размучен")
-        await notify_owner(context, f"Пользователь {target_id} размучен")
-    except Exception as e:
-        await update.message.reply_text("❌ Не удалось размутить пользователя")
+        await update.message.reply_text("Unmute OK")
+        await notify_owner(context, f"Unmute {target_id}")
+    except:
+        await update.message.reply_text("Error")
 
-# --- +Правила ---
+# --- +правила ---
 async def cmd_add_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id):
         return
@@ -294,61 +266,53 @@ async def cmd_add_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     lines = text.split('\n', 1)
     if len(lines) < 2:
-        await update.message.reply_text("❌ Напишите правила с новой строки")
+        await update.message.reply_text("Напиши правила с новой строки")
         return
-    
-    rules_text = lines[1].strip()
     
     if chat_id not in chat_settings:
         chat_settings[chat_id] = {}
     
-    chat_settings[chat_id]["rules"] = rules_text
-    await update.message.reply_text("✅ Правила сохранены")
-    await notify_owner(context, "Правила чата обновлены")
+    chat_settings[chat_id]["rules"] = lines[1].strip()
+    await update.message.reply_text("Правила сохранены")
+    await notify_owner(context, "Правила обновлены")
 
-# --- Правила (для всех) ---
+# --- правила ---
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     
     if chat_id not in chat_settings or "rules" not in chat_settings[chat_id]:
-        await update.message.reply_text("📋 Правила чата не установлены")
+        await update.message.reply_text("Правила не установлены")
         return
     
-    rules_text = chat_settings[chat_id]["rules"]
-    await update.message.reply_text(f"📋 **Правила чата:**\n\n{rules_text}")
+    await update.message.reply_text(f"Правила:\n\n{chat_settings[chat_id]['rules']}")
 
-# --- -стикеры N ---
+# --- -стикеры ---
 async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id):
         return
     
     chat_id = update.effective_chat.id
-    text = update.message.text.strip()
-    parts = text.split()
+    parts = update.message.text.strip().split()
     
     if len(parts) != 2:
         return
-        
+    
     try:
         limit = int(parts[1])
-    except ValueError:
+    except:
         return
-
+    
     if chat_id not in chat_settings:
         chat_settings[chat_id] = {}
-    
     if "sticker_settings" not in chat_settings[chat_id]:
         chat_settings[chat_id]["sticker_settings"] = {
-            "sticker_limit": None,
-            "sticker_punishment": "mute",
-            "sticker_punishment_duration": 3600,
-            "user_sticker_counter": {}
+            "sticker_limit": None, "sticker_punishment": "mute",
+            "sticker_punishment_duration": 3600, "user_sticker_counter": {}
         }
     
     chat_settings[chat_id]["sticker_settings"]["sticker_limit"] = limit
     chat_settings[chat_id]["sticker_settings"]["user_sticker_counter"] = {}
-    
-    await notify_owner(context, f"Лимит стикеров установлен: {limit}")
+    await notify_owner(context, f"Лимит стикеров: {limit}")
 
 # --- триггер стикеры ---
 async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -361,35 +325,31 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
     lines = text.split('\n', 1)
     if len(lines) < 2:
         return
-        
-    punishment_line = lines[1].strip().lower()
+    
+    punishment = lines[1].strip().lower()
     
     if chat_id not in chat_settings:
         chat_settings[chat_id] = {}
-    
     if "sticker_settings" not in chat_settings[chat_id]:
         chat_settings[chat_id]["sticker_settings"] = {
-            "sticker_limit": None,
-            "sticker_punishment": "mute",
-            "sticker_punishment_duration": 3600,
-            "user_sticker_counter": {}
+            "sticker_limit": None, "sticker_punishment": "mute",
+            "sticker_punishment_duration": 3600, "user_sticker_counter": {}
         }
     
-    if punishment_line == "бан":
+    if punishment == "бан":
         chat_settings[chat_id]["sticker_settings"]["sticker_punishment"] = "ban"
         chat_settings[chat_id]["sticker_settings"]["sticker_punishment_duration"] = None
-        await notify_owner(context, "Триггер стикеров: наказание — бан")
-    elif punishment_line.startswith("мут"):
-        time_match = re.search(r"мут\s+(.+)", punishment_line)
-        if time_match:
-            time_str = time_match.group(1).strip()
-            seconds = parse_time(time_str)
-            if seconds:
+        await notify_owner(context, "Триггер стикеров: бан")
+    elif punishment.startswith("мут"):
+        match = re.search(r"мут\s+(.+)", punishment)
+        if match:
+            sec = parse_time(match.group(1))
+            if sec:
                 chat_settings[chat_id]["sticker_settings"]["sticker_punishment"] = "mute"
-                chat_settings[chat_id]["sticker_settings"]["sticker_punishment_duration"] = seconds
-                await notify_owner(context, f"Триггер стикеров: наказание — мут {time_str}")
+                chat_settings[chat_id]["sticker_settings"]["sticker_punishment_duration"] = sec
+                await notify_owner(context, f"Триггер стикеров: мут {match.group(1)}")
 
-# --- Проверка стикеров ---
+# --- Обработка стикеров ---
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
@@ -397,40 +357,31 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in chat_settings or "sticker_settings" not in chat_settings[chat_id]:
         return
     
-    settings = chat_settings[chat_id]["sticker_settings"]
-    if settings["sticker_limit"] is None:
+    s = chat_settings[chat_id]["sticker_settings"]
+    if s["sticker_limit"] is None:
         return
-        
-    limit = settings["sticker_limit"]
-    counter = settings["user_sticker_counter"]
     
-    if user_id not in counter:
-        counter[user_id] = 0
-    counter[user_id] += 1
+    counter = s["user_sticker_counter"]
+    counter[user_id] = counter.get(user_id, 0) + 1
     
-    if counter[user_id] >= limit:
+    if counter[user_id] >= s["sticker_limit"]:
         counter[user_id] = 0
-        
-        if settings["sticker_punishment"] == "ban":
+        if s["sticker_punishment"] == "ban":
             try:
                 await context.bot.ban_chat_member(chat_id, user_id)
-                await notify_owner(context, f"Пользователь {user_id} забанен за {limit} стикеров подряд")
+                await notify_owner(context, f"Бан {user_id} за стикеры")
             except:
                 pass
-        elif settings["sticker_punishment"] == "mute":
-            until_date = datetime.now() + timedelta(seconds=settings["sticker_punishment_duration"])
+        else:
+            until = datetime.now() + timedelta(seconds=s["sticker_punishment_duration"])
             try:
                 await context.bot.restrict_chat_member(
                     chat_id, user_id,
-                    permissions={
-                        "can_send_messages": False,
-                        "can_send_media": False,
-                        "can_send_other": False,
-                        "can_add_web_page_previews": False
-                    },
-                    until_date=until_date
+                    permissions={"can_send_messages": False, "can_send_media": False,
+                                "can_send_other": False, "can_add_web_page_previews": False},
+                    until_date=until
                 )
-                await notify_owner(context, f"Пользователь {user_id} замучен за {limit} стикеров подряд")
+                await notify_owner(context, f"Мут {user_id} за стикеры")
             except:
                 pass
 
@@ -446,22 +397,28 @@ async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application: Application):
     await application.bot.set_my_commands([])
-    await application.bot.send_message(chat_id=OWNER_ID, text="✅ Бот запущен и готов к работе")
+    await application.bot.send_message(chat_id=OWNER_ID, text="Bot started")
 
 def main():
-    # Запускаем HTTP-сервер в отдельном потоке
-    threading.Thread(target=run_dummy_server, daemon=True).start()
+    threading.Thread(target=run_server, daemon=True).start()
     
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
-    app.add_handler(MessageHandler(
-        filters.TEXT & filters.Regex(r'^\+бот'),
-        cmd_grant_access
-    ))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+бот'), cmd_grant_access))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!пинг$'), cmd_ping))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^муты период'), cmd_mute_period))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^мут\b'), cmd_mute))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^анмут\b'), cmd_unmute))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+правила'), cmd_add_rules))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
+    app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
+    app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.COMMAND, handle_other))
     
-    app.add_handler(MessageHandler(
-        filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), 
-        cmd_del
-    ))
-    
-    app.add
+    print("Bot running...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
