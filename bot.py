@@ -289,8 +289,4 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!пинг$'), cmd_ping))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^муты период'), cmd_mute_period))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^мут\b'), cmd_mute))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^анмут\b'), cmd_unmute))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+правила'), cmd_add_rules))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd
+    app.add_handler
