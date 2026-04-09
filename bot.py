@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.constants import ParseMode
 
 # --- Токен из переменной окружения ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -34,7 +35,7 @@ def run_server():
     port = int(os.getenv('PORT', 8080))
     HTTPServer(('0.0.0.0', port), DummyHandler).serve_forever()
 
-# --- Уведомление владельцу ---
+# --- Уведомление владельцу (только для критического) ---
 async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str):
     try:
         await context.bot.send_message(chat_id=OWNER_ID, text=f"OK {text}")
@@ -45,22 +46,18 @@ async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str):
 def parse_time(time_str: str) -> int | None:
     time_str = time_str.lower().strip()
     
-    # Секунды
     match = re.match(r"(\d+)\s*(сек|секунд|секунду)", time_str)
     if match:
         return int(match.group(1))
     
-    # Минуты
     match = re.match(r"(\d+)\s*(минут|минута|минуту)", time_str)
     if match:
         return int(match.group(1)) * 60
     
-    # Часы
     match = re.match(r"(\d+)\s*(час|часа|часов)", time_str)
     if match:
         return int(match.group(1)) * 3600
     
-    # Дни
     match = re.match(r"(\d+)\s*(день|дня|дней)", time_str)
     if match:
         return int(match.group(1)) * 86400
@@ -71,39 +68,61 @@ def parse_time(time_str: str) -> int | None:
 def has_access(user_id: int) -> bool:
     return user_id in allowed_users
 
-# --- Получить ID цели ---
-def get_target_id(update: Update) -> int | None:
+# --- Получить ID цели и username ---
+def get_target_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target_id = None
+    target_name = None
+    
+    # Ответ на сообщение
     if update.message.reply_to_message:
-        return update.message.reply_to_message.from_user.id
+        user = update.message.reply_to_message.from_user
+        target_id = user.id
+        target_name = user.first_name or user.username or str(user.id)
+        return target_id, target_name
     
     text = update.message.text
+    
+    # Ищем mention по entity (самый надёжный способ)
     if update.message.entities:
         for entity in update.message.entities:
-            if entity.type == "text_mention" and entity.user:
-                return entity.user.id
+            if entity.type == "mention":
+                username = text[entity.offset:entity.offset + entity.length].lstrip('@')
+                target_name = username
+                # Пытаемся получить ID через username
+                try:
+                    # Простой способ - бот должен видеть пользователя
+                    pass
+                except:
+                    pass
+            elif entity.type == "text_mention" and entity.user:
+                target_id = entity.user.id
+                target_name = entity.user.first_name or f"@{entity.user.username}" or str(target_id)
+                return target_id, target_name
     
+    # Ищем @username через текст
     match = re.search(r'@(\w+)', text)
     if match:
-        return None
+        target_name = match.group(1)
     
+    # Ищем ID в тексте
     match = re.search(r'\b(\d{5,})\b', text)
     if match:
-        return int(match.group(1))
+        target_id = int(match.group(1))
+        target_name = str(target_id)
     
-    return None
+    return target_id, target_name
 
 # --- +бот ---
 async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
     
-    target_id = get_target_id(update)
+    target_id, target_name = get_target_info(update, context)
     if target_id:
         allowed_users.add(target_id)
-        await update.message.reply_text(f"OK Доступ выдан {target_id}")
-        await notify_owner(context, f"Доступ выдан {target_id}")
+        await update.message.reply_text(f"✅ Доступ выдан {target_name}")
     else:
-        await update.message.reply_text("Ошибка: не найден пользователь")
+        await update.message.reply_text("❌ Не удалось определить пользователя")
 
 # --- !дел ---
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -157,10 +176,10 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     start = datetime.now()
-    msg = await update.message.reply_text("Ping...")
+    msg = await update.message.reply_text("...")
     end = datetime.now()
     ping_ms = (end - start).total_seconds() * 1000
-    await msg.edit_text(f"Pong! {ping_ms:.0f}ms")
+    await msg.edit_text(f"{ping_ms:.0f}ms")
 
 # --- муты период ---
 async def cmd_mute_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -184,8 +203,7 @@ async def cmd_mute_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_settings[chat_id]["mute_settings"] = {}
     
     chat_settings[chat_id]["mute_settings"]["default_duration"] = seconds
-    await update.message.reply_text(f"OK Период мута: {match.group(1)}")
-    await notify_owner(context, f"Период мута изменен на {match.group(1)}")
+    await update.message.reply_text(f"✅ Период мута по умолчанию: {match.group(1)}")
 
 # --- мут ---
 async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,30 +213,59 @@ async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     
-    target_id = get_target_id(update)
+    # Пытаемся получить ID через упоминание
+    target_id = None
+    target_name = None
+    
+    # Ответ на сообщение
+    if update.message.reply_to_message:
+        user = update.message.reply_to_message.from_user
+        target_id = user.id
+        target_name = user.first_name or f"@{user.username}" or str(user.id)
+    # Упоминание через @
+    elif update.message.entities:
+        for entity in update.message.entities:
+            if entity.type == "mention":
+                username = text[entity.offset:entity.offset + entity.length].lstrip('@')
+                target_name = username
+                # Пытаемся получить ID через get_chat
+                try:
+                    chat_member = await context.bot.get_chat(f"@{username}")
+                    target_id = chat_member.id
+                except:
+                    pass
+            elif entity.type == "text_mention" and entity.user:
+                target_id = entity.user.id
+                target_name = entity.user.first_name or f"@{entity.user.username}" or str(target_id)
+    
     if not target_id:
-        await update.message.reply_text("Укажи пользователя")
+        await update.message.reply_text("❌ Пользователь не указан")
         return
     
-    duration = None
-    reason = "Без причины"
+    if not target_name:
+        target_name = str(target_id)
     
+    duration = None
+    
+    # Ищем время в команде
     time_match = re.match(r'мут\s+(\d+\s*(?:сек|секунд|минут|минута|минуту|час|часа|часов|день|дня|дней))\s+', text, re.IGNORECASE)
     if time_match:
         duration = parse_time(time_match.group(1))
-        remaining = text[time_match.end():].strip()
-        remaining = re.sub(r'@\w+', '', remaining).strip()
-        if remaining:
-            reason = remaining
     else:
         if chat_id in chat_settings and "mute_settings" in chat_settings[chat_id]:
             duration = chat_settings[chat_id]["mute_settings"].get("default_duration", 3600)
         else:
             duration = 3600
-        remaining = re.sub(r'^мут\s+', '', text, flags=re.IGNORECASE)
-        remaining = re.sub(r'@\w+', '', remaining).strip()
-        if remaining:
-            reason = remaining
+    
+    # Форматируем время для вывода
+    if duration >= 86400:
+        time_display = f"{duration // 86400} дн."
+    elif duration >= 3600:
+        time_display = f"{duration // 3600} ч."
+    elif duration >= 60:
+        time_display = f"{duration // 60} мин."
+    else:
+        time_display = f"{duration} сек."
     
     until_date = datetime.now() + timedelta(seconds=duration)
     try:
@@ -228,10 +275,9 @@ async def cmd_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "can_send_other": False, "can_add_web_page_previews": False},
             until_date=until_date
         )
-        await update.message.reply_text(f"Mute {target_id}\nReason: {reason}")
-        await notify_owner(context, f"Mute {target_id} reason: {reason}")
-    except:
-        await update.message.reply_text("Error")
+        await update.message.reply_text(f"🔇 {target_name} был замучен на {time_display}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Не удалось замутить {target_name}")
 
 # --- анмут ---
 async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,11 +285,35 @@ async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     chat_id = update.effective_chat.id
-    target_id = get_target_id(update)
+    text = update.message.text.strip()
+    
+    target_id = None
+    target_name = None
+    
+    if update.message.reply_to_message:
+        user = update.message.reply_to_message.from_user
+        target_id = user.id
+        target_name = user.first_name or f"@{user.username}" or str(user.id)
+    elif update.message.entities:
+        for entity in update.message.entities:
+            if entity.type == "mention":
+                username = text[entity.offset:entity.offset + entity.length].lstrip('@')
+                target_name = username
+                try:
+                    chat_member = await context.bot.get_chat(f"@{username}")
+                    target_id = chat_member.id
+                except:
+                    pass
+            elif entity.type == "text_mention" and entity.user:
+                target_id = entity.user.id
+                target_name = entity.user.first_name or f"@{entity.user.username}" or str(target_id)
     
     if not target_id:
-        await update.message.reply_text("Укажи пользователя")
+        await update.message.reply_text("❌ Пользователь не указан")
         return
+    
+    if not target_name:
+        target_name = str(target_id)
     
     try:
         await context.bot.restrict_chat_member(
@@ -251,10 +321,9 @@ async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
             permissions={"can_send_messages": True, "can_send_media": True,
                         "can_send_other": True, "can_add_web_page_previews": True}
         )
-        await update.message.reply_text("Unmute OK")
-        await notify_owner(context, f"Unmute {target_id}")
+        await update.message.reply_text(f"🔊 {target_name} размучен")
     except:
-        await update.message.reply_text("Error")
+        await update.message.reply_text(f"❌ Не удалось размутить {target_name}")
 
 # --- +правила ---
 async def cmd_add_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,29 +331,38 @@ async def cmd_add_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     chat_id = update.effective_chat.id
-    text = update.message.text.strip()
+    text = update.message.text
+    entities = update.message.entities
     
+    # Ищем текст после "+правила"
     lines = text.split('\n', 1)
     if len(lines) < 2:
-        await update.message.reply_text("Напиши правила с новой строки")
+        await update.message.reply_text("❌ Напишите правила с новой строки")
         return
+    
+    rules_text = lines[1].strip()
     
     if chat_id not in chat_settings:
         chat_settings[chat_id] = {}
     
-    chat_settings[chat_id]["rules"] = lines[1].strip()
-    await update.message.reply_text("Правила сохранены")
-    await notify_owner(context, "Правила обновлены")
+    chat_settings[chat_id]["rules"] = rules_text
+    chat_settings[chat_id]["rules_entities"] = entities
+    await update.message.reply_text("✅ Правила сохранены")
 
 # --- правила ---
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     
     if chat_id not in chat_settings or "rules" not in chat_settings[chat_id]:
-        await update.message.reply_text("Правила не установлены")
+        await update.message.reply_text("📋 Правила не установлены")
         return
     
-    await update.message.reply_text(f"Правила:\n\n{chat_settings[chat_id]['rules']}")
+    rules_text = chat_settings[chat_id]["rules"]
+    await update.message.reply_text(
+        f"📋 **Правила чата:**\n\n{rules_text}",
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=False
+    )
 
 # --- -стикеры ---
 async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -312,7 +390,6 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     chat_settings[chat_id]["sticker_settings"]["sticker_limit"] = limit
     chat_settings[chat_id]["sticker_settings"]["user_sticker_counter"] = {}
-    await notify_owner(context, f"Лимит стикеров: {limit}")
 
 # --- триггер стикеры ---
 async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -339,7 +416,6 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
     if punishment == "бан":
         chat_settings[chat_id]["sticker_settings"]["sticker_punishment"] = "ban"
         chat_settings[chat_id]["sticker_settings"]["sticker_punishment_duration"] = None
-        await notify_owner(context, "Триггер стикеров: бан")
     elif punishment.startswith("мут"):
         match = re.search(r"мут\s+(.+)", punishment)
         if match:
@@ -347,7 +423,6 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
             if sec:
                 chat_settings[chat_id]["sticker_settings"]["sticker_punishment"] = "mute"
                 chat_settings[chat_id]["sticker_settings"]["sticker_punishment_duration"] = sec
-                await notify_owner(context, f"Триггер стикеров: мут {match.group(1)}")
 
 # --- Обработка стикеров ---
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -369,7 +444,6 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if s["sticker_punishment"] == "ban":
             try:
                 await context.bot.ban_chat_member(chat_id, user_id)
-                await notify_owner(context, f"Бан {user_id} за стикеры")
             except:
                 pass
         else:
@@ -381,7 +455,6 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 "can_send_other": False, "can_add_web_page_previews": False},
                     until_date=until
                 )
-                await notify_owner(context, f"Мут {user_id} за стикеры")
             except:
                 pass
 
@@ -397,28 +470,4 @@ async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application: Application):
     await application.bot.set_my_commands([])
-    await application.bot.send_message(chat_id=OWNER_ID, text="Bot started")
-
-def main():
-    threading.Thread(target=run_server, daemon=True).start()
-    
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+бот'), cmd_grant_access))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!пинг$'), cmd_ping))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^муты период'), cmd_mute_period))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^мут\b'), cmd_mute))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^анмут\b'), cmd_unmute))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+правила'), cmd_add_rules))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
-    app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
-    app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.COMMAND, handle_other))
-    
-    print("Bot running...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    await application.bot.send_message(chat_id=OWNER_ID, text="✅
