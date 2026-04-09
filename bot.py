@@ -189,6 +189,13 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
         else: await update.message.reply_text("❌ Укажите время после 'мут'")
     else: await update.message.reply_text("❌ Укажите 'бан' или 'мут [время]'")
 
+async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Ссылка на инфо [тут](https://t.me/lunacyyflood)",
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
+    )
+
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id, user_id = update.effective_chat.id, update.effective_user.id
     s = chat_settings.get(chat_id, {}).get("sticker_settings")
@@ -243,6 +250,10 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\.флуд инфо$'), cmd_flood_info))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\.инфо флуд$'), cmd_flood_info))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!флуд инфо$'), cmd_flood_info))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!инфо флуд$'), cmd_flood_info))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
     app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.COMMAND, handle_other))
     print("Starting bot...")
