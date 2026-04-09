@@ -1,37 +1,15 @@
 import os
 import asyncio
 import re
-import threading
-import time
 from datetime import datetime, timedelta
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set")
-
+BOT_TOKEN = "8352504575:AAGa6_2HepvJcUVGFcLHpsuCA27G1Y4615E"
 OWNER_ID = 7416252489
 allowed_users = {OWNER_ID}
 chat_settings = {}
-
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
-    def log_message(self, format, *args):
-        pass
-
-def run_server():
-    port = int(os.getenv('PORT', 8080))
-    print(f"HTTP server starting on port {port}")
-    HTTPServer(('0.0.0.0', port), DummyHandler).serve_forever()
 
 def parse_time(time_str: str) -> int | None:
     time_str = time_str.lower().strip()
@@ -286,9 +264,6 @@ async def post_init(app: Application):
     print("Bot started!")
 
 def main():
-    threading.Thread(target=run_server, daemon=True).start()
-    time.sleep(1)
-    
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+бот'), cmd_grant_access))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
@@ -301,4 +276,9 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
-   
+    app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.COMMAND, handle_other))
+    print("Starting bot...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
