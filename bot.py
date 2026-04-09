@@ -50,21 +50,25 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cmd_id = update.message.message_id
     parts = text.split()
     
+    try:
+        await context.bot.delete_message(chat_id, cmd_id)
+    except:
+        pass
+    
     if len(parts) == 1:
         if not update.message.reply_to_message:
             msg = await context.bot.send_message(chat_id, "Ответь на сообщение")
             await asyncio.sleep(3)
-            try: await msg.delete()
-            except: pass
+            try:
+                await msg.delete()
+            except:
+                pass
             return
         
         try:
-            await context.bot.delete_message(chat_id, cmd_id)
-        except: pass
-        
-        try:
             await context.bot.delete_message(chat_id, update.message.reply_to_message.message_id)
-        except: pass
+        except:
+            pass
         return
     
     try:
@@ -72,25 +76,17 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         return
     
-    try:
-        await context.bot.delete_message(chat_id, cmd_id)
-    except: pass
+    deleted = 0
+    current_id = cmd_id - 1
     
-    start_id = cmd_id - count
-    if start_id < 0:
-        start_id = 0
-    msg_ids = list(range(start_id, cmd_id))
-    
-    for i in range(0, len(msg_ids), 100):
-        chunk = msg_ids[i:i+100]
+    while deleted < count and current_id > 0:
         try:
-            await context.bot.delete_messages(chat_id, chunk)
+            await context.bot.delete_message(chat_id, current_id)
+            deleted += 1
         except:
-            for mid in chunk:
-                try:
-                    await context.bot.delete_message(chat_id, mid)
-                except:
-                    pass
+            pass
+        current_id -= 1
+        await asyncio.sleep(0.05)
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id): return
