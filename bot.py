@@ -132,23 +132,12 @@ async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text(f"❌ Не удалось размутить {target_name}")
 
-async def cmd_add_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not has_access(update.effective_user.id): return
-    chat_id = update.effective_chat.id
-    lines = update.message.text.split('\n', 1)
-    if len(lines) < 2:
-        await update.message.reply_text("❌ Напишите правила с новой строки")
-        return
-    chat_settings.setdefault(chat_id, {})["rules"] = lines[1].strip()
-    await update.message.reply_text("✅ Правила сохранены")
-
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    rules = chat_settings.get(chat_id, {}).get("rules")
-    if not rules:
-        await update.message.reply_text("📋 Правила не установлены")
-        return
-    await update.message.reply_text(f"📋 **Правила чата:**\n\n{rules}", parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=False)
+    await update.message.reply_text(
+        "Ознакомиться с правилами [тут](https://telegra.ph/Rules-01-24-146)",
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
+    )
 
 async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id): return
@@ -246,7 +235,6 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!пинг$'), cmd_ping))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^анмут\b'), cmd_unmute))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+правила'), cmd_add_rules))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
