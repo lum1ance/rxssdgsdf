@@ -150,8 +150,8 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
     parts = update.message.text.strip().split()
-    if len(parts) != 2: return
-    try: limit = int(parts[1])
+    if len(parts) != 3: return
+    try: limit = int(parts[2])
     except: return
     s = chat_settings.setdefault(chat_id, {}).setdefault("sticker_settings", {
         "sticker_limit": None, "sticker_punishment": "mute", "sticker_punishment_duration": 3600, "user_sticker_counter": {}
@@ -160,29 +160,39 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     s["user_sticker_counter"] = {}
     await update.message.reply_text(f"✅ Лимит стикеров установлен: {limit}")
 
-async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Настроить наказание за превышение лимита стикеров"""
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
-    lines = update.message.text.strip().split('\n', 1)
-    if len(lines) < 2: return
-    punishment = lines[1].strip()
+    text = update.message.text.strip()
+    
+    # Убираем "стикеры" из начала
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text("❌ Укажите наказание: бан или мут [время]")
+        return
+    
+    punishment = parts[1].strip()
     s = chat_settings.setdefault(chat_id, {}).setdefault("sticker_settings", {
         "sticker_limit": None, "sticker_punishment": "mute", "sticker_punishment_duration": 3600, "user_sticker_counter": {}
     })
+    
     if punishment.lower() == "бан":
         s["sticker_punishment"], s["sticker_punishment_duration"] = "ban", None
-        await update.message.reply_text("✅ Триггер стикеров: бан")
+        await update.message.reply_text("✅ Наказание за стикеры: бан")
     elif punishment.lower().startswith("мут"):
         m = re.search(r"мут\s+(.+)", punishment, re.IGNORECASE)
         if m:
             sec = parse_time(m.group(1))
             if sec:
                 s["sticker_punishment"], s["sticker_punishment_duration"] = "mute", sec
-                await update.message.reply_text(f"✅ Триггер стикеров: мут {m.group(1)}")
-            else: await update.message.reply_text("❌ Неверный формат времени")
-        else: await update.message.reply_text("❌ Укажите время после 'мут'")
-    else: await update.message.reply_text("❌ Укажите 'бан' или 'мут [время]'")
+                await update.message.reply_text(f"✅ Наказание за стикеры: мут {m.group(1)}")
+            else:
+                await update.message.reply_text("❌ Неверный формат времени")
+        else:
+            await update.message.reply_text("❌ Укажите время после 'мут'")
+    else:
+        await update.message.reply_text("❌ Укажите 'бан' или 'мут [время]'")
 
 async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать информацию о флуде"""
@@ -272,6 +282,87 @@ async def cmd_tgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         await update.message.reply_text(f"❌ Не удалось назначить админа: {str(e)[:100]}")
+
+async def cmd_alltgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдать ВСЕ права админа (кроме анонимности)"""
+    if update.effective_user.id != OWNER_ID: return
+    chat_id = update.effective_chat.id
+    target_id, target_name = None, None
+    
+    if update.message.reply_to_message:
+        u = update.message.reply_to_message.from_user
+        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
+    elif update.message.entities:
+        text = update.message.text
+        for e in update.message.entities:
+            if e.type == "text_mention" and e.user:
+                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
+                break
+            elif e.type == "mention":
+                username = text[e.offset:e.offset + e.length].lstrip('@')
+                target_name = username
+                try:
+                    target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
+                except:
+                    try:
+                        target_id = (await context.bot.get_chat(f"@{username}")).id
+                    except:
+                        pass
+                break
+    
+    if not target_id:
+        await update.message.reply_text("❌ Не удалось определить пользователя")
+        return
+    
+    if not target_name:
+        target_name = str(target_id)
+    
+    try:
+        bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
+        if not bot_member.can_promote_members:
+            await update.message.reply_text("❌ У бота нет права назначать администраторов")
+            return
+    except:
+        await update.message.reply_text("❌ Бот не является администратором чата")
+        return
+    
+    try:
+        target_member = await context.bot.get_chat_member(chat_id, target_id)
+        if target_member.status == "creator":
+            await update.message.reply_text("❌ Нельзя выдать админку создателю чата")
+            return
+    except:
+        pass
+    
+    try:
+        await context.bot.promote_chat_member(
+            chat_id=chat_id,
+            user_id=target_id,
+            can_manage_chat=True,
+            can_delete_messages=True,
+            can_manage_video_chats=True,
+            can_restrict_members=True,
+            can_promote_members=True,
+            can_change_info=True,
+            can_invite_users=True,
+            can_post_messages=True,
+            can_edit_messages=True,
+            can_pin_messages=True,
+            can_manage_topics=True,
+            is_anonymous=False
+        )
+        
+        if chat_id not in admin_log:
+            admin_log[chat_id] = {}
+        admin_log[chat_id][target_id] = update.effective_user.id
+        
+        await update.message.reply_text(f"✅ {target_name} получил все права администратора")
+        await context.bot.send_message(
+            OWNER_ID,
+            f"👑 {target_name} (ID: {target_id}) получил ВСЕ права админа в чате {chat_id}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Не удалось выдать права: {str(e)[:100]}")
 
 async def cmd_untgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Снять админку в чате"""
@@ -393,6 +484,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!дел(\s+\d+)?$'), cmd_del))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!пинг$'), cmd_ping))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!тгадмин'), cmd_tgadmin))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!аллтг'), cmd_alltgadmin))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!антгадмин'), cmd_untgadmin))
     
     # Команды информации
@@ -404,8 +496,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!инфо флуд$'), cmd_flood_info))
     
     # Команды анти-стикер спама
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^-стикеры\s+\d+$'), cmd_stickers_limit))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^триггер стикеры'), cmd_trigger_stickers))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^стикеры спам\s+\d+$'), cmd_stickers_limit))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^стикеры\s+(бан|мут)'), cmd_stickers_punishment))
     
     # Обработчики сообщений
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
