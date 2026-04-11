@@ -6,12 +6,11 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 
-BOT_TOKEN = "8352504575:AAGa6_2HepvJcUVGFcLHpsuCA27G1Y4615E"
+BOT_TOKEN = "8573201067:AAGvvfIyn6yA1oSFzubflhJG0BVNbU5ly0M"
 OWNER_ID = 7416252489
 allowed_users = {OWNER_ID}
 chat_settings = {}
 custom_rules_link = None
-admin_log = {}
 
 def parse_time(time_str: str) -> int | None:
     time_str = time_str.lower().strip()
@@ -166,7 +165,6 @@ async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     
-    # Убираем "стикеры" из начала
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
         await update.message.reply_text("❌ Укажите наказание: бан или мут [время]")
@@ -201,241 +199,6 @@ async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN,
         disable_web_page_preview=True
     )
-
-async def cmd_tgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выдать админку в чате с базовыми правами"""
-    if update.effective_user.id != OWNER_ID: return
-    chat_id = update.effective_chat.id
-    target_id, target_name = None, None
-    
-    if update.message.reply_to_message:
-        u = update.message.reply_to_message.from_user
-        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
-    elif update.message.entities:
-        text = update.message.text
-        for e in update.message.entities:
-            if e.type == "text_mention" and e.user:
-                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
-                break
-            elif e.type == "mention":
-                username = text[e.offset:e.offset + e.length].lstrip('@')
-                target_name = username
-                try:
-                    target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
-                except:
-                    try:
-                        target_id = (await context.bot.get_chat(f"@{username}")).id
-                    except:
-                        pass
-                break
-    
-    if not target_id:
-        await update.message.reply_text("❌ Не удалось определить пользователя")
-        return
-    
-    if not target_name:
-        target_name = str(target_id)
-    
-    try:
-        bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
-        if not bot_member.can_promote_members:
-            await update.message.reply_text("❌ У бота нет права назначать администраторов")
-            return
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка проверки прав бота: {str(e)[:100]}")
-        return
-    
-    try:
-        target_member = await context.bot.get_chat_member(chat_id, target_id)
-        if target_member.status in ["administrator", "creator"]:
-            await update.message.reply_text(f"ℹ️ {target_name} уже является администратором или создателем")
-            return
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка проверки пользователя: {str(e)[:100]}")
-        return
-    
-    try:
-        await context.bot.promote_chat_member(
-            chat_id=chat_id,
-            user_id=target_id,
-            can_manage_chat=True,
-            can_delete_messages=True,
-            can_manage_video_chats=False,
-            can_restrict_members=True,
-            can_promote_members=False,
-            can_change_info=False,
-            can_invite_users=True,
-            can_post_messages=False,
-            can_edit_messages=False,
-            can_pin_messages=True,
-            can_manage_topics=False,
-            is_anonymous=False
-        )
-        
-        if chat_id not in admin_log:
-            admin_log[chat_id] = {}
-        admin_log[chat_id][target_id] = update.effective_user.id
-        
-        await update.message.reply_text(f"✅ {target_name} назначен администратором")
-        await context.bot.send_message(
-            OWNER_ID,
-            f"👑 {target_name} (ID: {target_id}) назначен админом в чате {chat_id}"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Не удалось назначить админа: {str(e)[:100]}")
-
-async def cmd_alltgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выдать ВСЕ права админа (кроме анонимности)"""
-    if update.effective_user.id != OWNER_ID: return
-    chat_id = update.effective_chat.id
-    target_id, target_name = None, None
-    
-    if update.message.reply_to_message:
-        u = update.message.reply_to_message.from_user
-        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
-    elif update.message.entities:
-        text = update.message.text
-        for e in update.message.entities:
-            if e.type == "text_mention" and e.user:
-                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
-                break
-            elif e.type == "mention":
-                username = text[e.offset:e.offset + e.length].lstrip('@')
-                target_name = username
-                try:
-                    target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
-                except:
-                    try:
-                        target_id = (await context.bot.get_chat(f"@{username}")).id
-                    except:
-                        pass
-                break
-    
-    if not target_id:
-        await update.message.reply_text("❌ Не удалось определить пользователя")
-        return
-    
-    if not target_name:
-        target_name = str(target_id)
-    
-    try:
-        # Проверяем права бота
-        bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
-        if not bot_member.can_promote_members:
-            await update.message.reply_text("❌ У бота нет права назначать администраторов")
-            return
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка проверки прав бота: {str(e)[:100]}")
-        return
-    
-    try:
-        # Проверяем, что цель не создатель
-        target_member = await context.bot.get_chat_member(chat_id, target_id)
-        if target_member.status == "creator":
-            await update.message.reply_text("❌ Нельзя выдать админку создателю чата")
-            return
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка проверки пользователя: {str(e)[:100]}")
-        return
-    
-    try:
-        # Выдаём все возможные права
-        await context.bot.promote_chat_member(
-            chat_id=chat_id,
-            user_id=target_id,
-            is_anonymous=False,
-            can_manage_chat=True,
-            can_delete_messages=True,
-            can_manage_video_chats=True,
-            can_restrict_members=True,
-            can_promote_members=True,
-            can_change_info=True,
-            can_invite_users=True,
-            can_post_messages=True,
-            can_edit_messages=True,
-            can_pin_messages=True,
-            can_manage_topics=True
-        )
-        
-        if chat_id not in admin_log:
-            admin_log[chat_id] = {}
-        admin_log[chat_id][target_id] = update.effective_user.id
-        
-        await update.message.reply_text(f"✅ {target_name} получил все права администратора")
-        await context.bot.send_message(
-            OWNER_ID,
-            f"👑 {target_name} (ID: {target_id}) получил ВСЕ права админа в чате {chat_id}"
-        )
-    except Exception as e:
-        error_msg = str(e)
-        if "not enough rights" in error_msg.lower() or "right_forbidden" in error_msg.lower():
-            await update.message.reply_text("❌ У бота недостаточно прав для выдачи всех привилегий. Проверь, что у бота включены ВСЕ права в настройках чата.")
-        else:
-            await update.message.reply_text(f"❌ Не удалось выдать права: {error_msg[:100]}")
-
-async def cmd_untgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Снять админку в чате"""
-    if update.effective_user.id != OWNER_ID: return
-    chat_id = update.effective_chat.id
-    target_id, target_name = None, None
-    
-    if update.message.reply_to_message:
-        u = update.message.reply_to_message.from_user
-        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
-    elif update.message.entities:
-        text = update.message.text
-        for e in update.message.entities:
-            if e.type == "text_mention" and e.user:
-                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
-                break
-            elif e.type == "mention":
-                username = text[e.offset:e.offset + e.length].lstrip('@')
-                target_name = username
-                try:
-                    target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
-                except:
-                    try:
-                        target_id = (await context.bot.get_chat(f"@{username}")).id
-                    except:
-                        pass
-                break
-    
-    if not target_id:
-        await update.message.reply_text("❌ Не удалось определить пользователя")
-        return
-    
-    if not target_name:
-        target_name = str(target_id)
-    
-    try:
-        target_member = await context.bot.get_chat_member(chat_id, target_id)
-        if target_member.status == "creator":
-            await update.message.reply_text("❌ Нельзя снять админку с создателя чата")
-            return
-        
-        await context.bot.promote_chat_member(
-            chat_id=chat_id,
-            user_id=target_id,
-            can_manage_chat=False,
-            can_delete_messages=False,
-            can_manage_video_chats=False,
-            can_restrict_members=False,
-            can_promote_members=False,
-            can_change_info=False,
-            can_invite_users=False,
-            can_post_messages=False,
-            can_edit_messages=False,
-            can_pin_messages=False,
-            can_manage_topics=False,
-            is_anonymous=False
-        )
-        await update.message.reply_text(f"⬇️ {target_name} больше не администратор")
-        await context.bot.send_message(
-            OWNER_ID,
-            f"⬇️ {target_name} (ID: {target_id}) снят с админки в чате {chat_id}"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Не удалось снять админку: {str(e)[:100]}")
 
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка стикеров для анти-спам системы"""
@@ -492,9 +255,6 @@ def main():
     # Команды администрирования
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!дел(\s+\d+)?$'), cmd_del))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!пинг$'), cmd_ping))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!тгадмин'), cmd_tgadmin))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!аллтг'), cmd_alltgadmin))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!антгадмин'), cmd_untgadmin))
     
     # Команды информации
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\+правила'), cmd_set_rules))
