@@ -88,14 +88,14 @@ async def cmd_set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = text.split(maxsplit=1)
     if len(parts) == 1:
         custom_rules_link = None
-        await update.message.reply_text("✅ Ссылка сброшена на стандартную")
+        await update.message.reply_text("✅ Правила удалены")
         return
     link = parts[1].strip()
     if not (link.startswith("http://") or link.startswith("https://") or link.startswith("t.me/")):
         await update.message.reply_text("❌ Укажи корректную ссылку (начинается с http://, https:// или t.me/)")
         return
     custom_rules_link = link
-    await update.message.reply_text(f"✅ Ссылка на правила обновлена:\n{link}")
+    await update.message.reply_text(f"✅ Правила установлены:\n{link}")
 
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удалить сообщения"""
@@ -135,9 +135,12 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать правила"""
-    link = custom_rules_link if custom_rules_link else "https://telegra.ph/Rules-01-24-146"
+    if custom_rules_link is None:
+        await update.message.reply_text("❌ Правила не установлены")
+        return
+    
     await update.message.reply_text(
-        f"Ознакомиться с правилами [тут]({link})",
+        f"Ознакомиться с правилами [тут]({custom_rules_link})",
         parse_mode=ParseMode.MARKDOWN,
         disable_web_page_preview=True
     )
