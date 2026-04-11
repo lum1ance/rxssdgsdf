@@ -203,7 +203,7 @@ async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_tgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выдать админку в чате"""
+    """Выдать админку в чате с базовыми правами"""
     if update.effective_user.id != OWNER_ID: return
     chat_id = update.effective_chat.id
     target_id, target_name = None, None
@@ -241,8 +241,8 @@ async def cmd_tgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not bot_member.can_promote_members:
             await update.message.reply_text("❌ У бота нет права назначать администраторов")
             return
-    except:
-        await update.message.reply_text("❌ Бот не является администратором чата")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка проверки прав бота: {str(e)[:100]}")
         return
     
     try:
@@ -250,8 +250,9 @@ async def cmd_tgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if target_member.status in ["administrator", "creator"]:
             await update.message.reply_text(f"ℹ️ {target_name} уже является администратором или создателем")
             return
-    except:
-        pass
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка проверки пользователя: {str(e)[:100]}")
+        return
     
     try:
         await context.bot.promote_chat_member(
@@ -318,26 +319,31 @@ async def cmd_alltgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_name = str(target_id)
     
     try:
+        # Проверяем права бота
         bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
         if not bot_member.can_promote_members:
             await update.message.reply_text("❌ У бота нет права назначать администраторов")
             return
-    except:
-        await update.message.reply_text("❌ Бот не является администратором чата")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка проверки прав бота: {str(e)[:100]}")
         return
     
     try:
+        # Проверяем, что цель не создатель
         target_member = await context.bot.get_chat_member(chat_id, target_id)
         if target_member.status == "creator":
             await update.message.reply_text("❌ Нельзя выдать админку создателю чата")
             return
-    except:
-        pass
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка проверки пользователя: {str(e)[:100]}")
+        return
     
     try:
+        # Выдаём все возможные права
         await context.bot.promote_chat_member(
             chat_id=chat_id,
             user_id=target_id,
+            is_anonymous=False,
             can_manage_chat=True,
             can_delete_messages=True,
             can_manage_video_chats=True,
@@ -348,8 +354,7 @@ async def cmd_alltgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             can_post_messages=True,
             can_edit_messages=True,
             can_pin_messages=True,
-            can_manage_topics=True,
-            is_anonymous=False
+            can_manage_topics=True
         )
         
         if chat_id not in admin_log:
@@ -362,7 +367,11 @@ async def cmd_alltgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👑 {target_name} (ID: {target_id}) получил ВСЕ права админа в чате {chat_id}"
         )
     except Exception as e:
-        await update.message.reply_text(f"❌ Не удалось выдать права: {str(e)[:100]}")
+        error_msg = str(e)
+        if "not enough rights" in error_msg.lower() or "right_forbidden" in error_msg.lower():
+            await update.message.reply_text("❌ У бота недостаточно прав для выдачи всех привилегий. Проверь, что у бота включены ВСЕ права в настройках чата.")
+        else:
+            await update.message.reply_text(f"❌ Не удалось выдать права: {error_msg[:100]}")
 
 async def cmd_untgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Снять админку в чате"""
