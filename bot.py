@@ -10,6 +10,7 @@ BOT_TOKEN = "8352504575:AAGa6_2HepvJcUVGFcLHpsuCA27G1Y4615E"
 OWNER_ID = 7416252489
 allowed_users = {OWNER_ID}
 chat_settings = {}
+custom_rules_link = None
 
 def parse_time(time_str: str) -> int | None:
     time_str = time_str.lower().strip()
@@ -42,49 +43,80 @@ async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Не удалось определить пользователя")
 
+async def cmd_revoke_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID: return
+    target_id, target_name = None, None
+    if update.message.reply_to_message:
+        u = update.message.reply_to_message.from_user
+        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
+    elif update.message.entities:
+        for e in update.message.entities:
+            if e.type == "text_mention" and e.user:
+                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
+                break
+            elif e.type == "mention":
+                username = update.message.text[e.offset:e.offset + e.length].lstrip('@')
+                target_name = username
+                try:
+                    target_id = (await context.bot.get_chat_member(update.effective_chat.id, f"@{username}")).user.id
+                except:
+                    try:
+                        target_id = (await context.bot.get_chat(f"@{username}")).id
+                    except:
+                        pass
+                break
+    if not target_id:
+        await update.message.reply_text("❌ Не удалось определить пользователя")
+        return
+    if target_id == OWNER_ID:
+        await update.message.reply_text("❌ Нельзя отозвать права у владельца")
+        return
+    if target_id in allowed_users:
+        allowed_users.remove(target_id)
+        await update.message.reply_text(f"❌ Права отозваны у {target_name}")
+    else:
+        await update.message.reply_text(f"ℹ️ У {target_name} и так нет прав")
+
+async def cmd_set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID: return
+    global custom_rules_link
+    text = update.message.text.strip()
+    parts = text.split(maxsplit=1)
+    if len(parts) == 1:
+        custom_rules_link = None
+        await update.message.reply_text("✅ Ссылка сброшена на стандартную")
+        return
+    link = parts[1].strip()
+    if not (link.startswith("http://") or link.startswith("https://") or link.startswith("t.me/")):
+        await update.message.reply_text("❌ Укажи корректную ссылку (начинается с http://, https:// или t.me/)")
+        return
+    custom_rules_link = link
+    await update.message.reply_text(f"✅ Ссылка на правила обновлена:\n{link}")
+
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not has_access(update.effective_user.id): return
-    
-    text = update.message.text.strip()
-    chat_id = update.effective_chat.id
-    cmd_id = update.message.message_id
+    text, chat_id, cmd_id = update.message.text.strip(), update.effective_chat.id, update.message.message_id
     parts = text.split()
-    
-    try:
-        await context.bot.delete_message(chat_id, cmd_id)
-    except:
-        pass
-    
+    try: await context.bot.delete_message(chat_id, cmd_id)
+    except: pass
     if len(parts) == 1:
         if not update.message.reply_to_message:
             msg = await context.bot.send_message(chat_id, "Ответь на сообщение")
             await asyncio.sleep(3)
-            try:
-                await msg.delete()
-            except:
-                pass
+            try: await msg.delete()
+            except: pass
             return
-        
-        try:
-            await context.bot.delete_message(chat_id, update.message.reply_to_message.message_id)
-        except:
-            pass
+        try: await context.bot.delete_message(chat_id, update.message.reply_to_message.message_id)
+        except: pass
         return
-    
-    try:
-        count = int(parts[1])
-    except:
-        return
-    
-    deleted = 0
-    current_id = cmd_id - 1
-    
+    try: count = int(parts[1])
+    except: return
+    deleted, current_id = 0, cmd_id - 1
     while deleted < count and current_id > 0:
         try:
             await context.bot.delete_message(chat_id, current_id)
             deleted += 1
-        except:
-            pass
+        except: pass
         current_id -= 1
         await asyncio.sleep(0.05)
 
@@ -110,9 +142,7 @@ async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif e.type == "mention":
                 username = text[e.offset:e.offset + e.length].lstrip('@')
                 target_name = username
-                try:
-                    member = await context.bot.get_chat_member(chat_id, f"@{username}")
-                    target_id = member.user.id
+                try: target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
                 except:
                     try: target_id = (await context.bot.get_chat(f"@{username}")).id
                     except: pass
@@ -129,8 +159,9 @@ async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Не удалось размутить {target_name}")
 
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    link = custom_rules_link if custom_rules_link else "https://telegra.ph/Rules-01-24-146"
     await update.message.reply_text(
-        "Ознакомиться с правилами [тут](https://telegra.ph/Rules-01-24-146)",
+        f"Ознакомиться с правилами [тут]({link})",
         parse_mode=ParseMode.MARKDOWN,
         disable_web_page_preview=True
     )
@@ -159,16 +190,14 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
         "sticker_limit": None, "sticker_punishment": "mute", "sticker_punishment_duration": 3600, "user_sticker_counter": {}
     })
     if punishment.lower() == "бан":
-        s["sticker_punishment"] = "ban"
-        s["sticker_punishment_duration"] = None
+        s["sticker_punishment"], s["sticker_punishment_duration"] = "ban", None
         await update.message.reply_text("✅ Триггер стикеров: бан")
     elif punishment.lower().startswith("мут"):
         m = re.search(r"мут\s+(.+)", punishment, re.IGNORECASE)
         if m:
             sec = parse_time(m.group(1))
             if sec:
-                s["sticker_punishment"] = "mute"
-                s["sticker_punishment_duration"] = sec
+                s["sticker_punishment"], s["sticker_punishment_duration"] = "mute", sec
                 await update.message.reply_text(f"✅ Триггер стикеров: мут {m.group(1)}")
             else: await update.message.reply_text("❌ Неверный формат времени")
         else: await update.message.reply_text("❌ Укажите время после 'мут'")
@@ -223,24 +252,24 @@ async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(app: Application):
     await app.bot.set_my_commands([])
     await app.bot.send_message(OWNER_ID, "Bot started")
-    print("Bot started!")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\+бот'), cmd_grant_access))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!дел(\s+\d+)?$'), cmd_del))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!пинг$'), cmd_ping))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^анмут\b'), cmd_unmute))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^правила$'), cmd_rules))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^-стикеры\s+\d+$'), cmd_stickers_limit))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^триггер стикеры'), cmd_trigger_stickers))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\.флуд инфо$'), cmd_flood_info))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\.инфо флуд$'), cmd_flood_info))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!флуд инфо$'), cmd_flood_info))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^!инфо флуд$'), cmd_flood_info))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\+бот'), cmd_grant_access))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^-бот'), cmd_revoke_access))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\+правила'), cmd_set_rules))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!дел(\s+\d+)?$'), cmd_del))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!пинг$'), cmd_ping))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^анмут\b'), cmd_unmute))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^правила$'), cmd_rules))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^-стикеры\s+\d+$'), cmd_stickers_limit))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^триггер стикеры'), cmd_trigger_stickers))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\.флуд инфо$'), cmd_flood_info))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\.инфо флуд$'), cmd_flood_info))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!флуд инфо$'), cmd_flood_info))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!инфо флуд$'), cmd_flood_info))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
     app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.COMMAND, handle_other))
-    print("Starting bot...")
     app.run_polling()
 
 if __name__ == "__main__":
