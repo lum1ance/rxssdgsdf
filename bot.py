@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
-from telegram.constants import ParseMode
+from telegram.constants import ParseMode, ChatType
 
 BOT_TOKEN = "8573201067:AAGvvfIyn6yA1oSFzubflhJG0BVNbU5ly0M"
 OWNER_ID = 7416252489
@@ -27,8 +27,72 @@ def parse_time(time_str: str) -> int | None:
 def has_access(user_id: int) -> bool:
     return user_id in allowed_users
 
+def is_private_chat(update: Update) -> bool:
+    """Проверяет, является ли чат личным"""
+    return update.effective_chat.type == ChatType.PRIVATE
+
+def is_owner(update: Update) -> bool:
+    """Проверяет, является ли пользователь владельцем"""
+    return update.effective_user.id == OWNER_ID
+
+async def check_private_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Проверяет, можно ли отвечать в личном чате.
+    Возвращает True если ответ разрешён, False если нет.
+    Если False - отправляет сообщение о запрете.
+    """
+    if is_private_chat(update) and not is_owner(update):
+        await update.message.reply_text("❌ Бот не отвечает в личных сообщениях")
+        return False
+    return True
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать список команд"""
+    if is_private_chat(update) and not is_owner(update):
+        return  # В личке чужим не отвечаем, даже хелп не показываем
+    
+    user_id = update.effective_user.id
+    is_admin = has_access(user_id)
+    is_owner_user = is_owner(update)
+    
+    help_text = "📋 **Список команд:**\n\n"
+    
+    # Публичные команды
+    help_text += "🌐 **Для всех:**\n"
+    help_text += "`правила` — показать правила чата\n"
+    help_text += "`.флуд инфо` / `!флуд инфо` — информация о флуде\n\n"
+    
+    # Команды для админов (с доступом)
+    if is_admin:
+        help_text += "👑 **Администрирование:**\n"
+        help_text += "`!дел` (реплай) — удалить одно сообщение\n"
+        help_text += "`!дел 10` — удалить 10 последних сообщений\n"
+        help_text += "`!пинг` — проверить задержку бота\n\n"
+        
+        help_text += "🛡️ **Анти-стикер спам:**\n"
+        help_text += "`стикеры спам 5` — установить лимит стикеров\n"
+        help_text += "`стикеры бан` — бан за превышение лимита\n"
+        help_text += "`стикеры мут 15 минут` — мут за превышение\n\n"
+    
+    # Команды только для владельца
+    if is_owner_user:
+        help_text += "⚙️ **Владелец:**\n"
+        help_text += "`+бот @user` — выдать доступ к боту\n"
+        help_text += "`-бот @user` — отозвать доступ\n"
+        help_text += "`+правила ссылка` — установить правила\n"
+        help_text += "`+правила` — удалить правила\n\n"
+    
+    help_text += "`!хелп` / `.хелп` / `/хелп` — это сообщение"
+    
+    await update.message.reply_text(
+        help_text,
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
+    )
+
 async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Выдать доступ к командам бота"""
+    if not await check_private_chat(update, context): return
     if update.effective_user.id != OWNER_ID: return
     target_id, target_name = None, None
     if update.message.reply_to_message:
@@ -46,6 +110,7 @@ async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_revoke_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отозвать доступ к командам бота"""
+    if not await check_private_chat(update, context): return
     if update.effective_user.id != OWNER_ID: return
     target_id, target_name = None, None
     if update.message.reply_to_message:
@@ -81,6 +146,7 @@ async def cmd_revoke_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Изменить ссылку в команде 'правила'"""
+    if not await check_private_chat(update, context): return
     if update.effective_user.id != OWNER_ID: return
     global custom_rules_link
     text = update.message.text.strip()
@@ -98,6 +164,7 @@ async def cmd_set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удалить сообщения"""
+    if not await check_private_chat(update, context): return
     if not has_access(update.effective_user.id): return
     text, chat_id, cmd_id = update.message.text.strip(), update.effective_chat.id, update.message.message_id
     parts = text.split()
@@ -126,6 +193,7 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Проверить задержку бота"""
+    if not await check_private_chat(update, context): return
     if not has_access(update.effective_user.id): return
     start = datetime.now()
     msg = await update.message.reply_text("...")
@@ -134,6 +202,7 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать правила"""
+    if not await check_private_chat(update, context): return
     if custom_rules_link is None:
         await update.message.reply_text("❌ Правила не установлены")
         return
@@ -146,6 +215,7 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Установить лимит стикеров"""
+    if not await check_private_chat(update, context): return
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
     parts = update.message.text.strip().split()
@@ -161,6 +231,7 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Настроить наказание за превышение лимита стикеров"""
+    if not await check_private_chat(update, context): return
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
@@ -194,6 +265,7 @@ async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_
 
 async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать информацию о флуде"""
+    if not await check_private_chat(update, context): return
     await update.message.reply_text(
         "Ссылка на инфо [тут](https://t.me/lunacyyflood)",
         parse_mode=ParseMode.MARKDOWN,
@@ -202,6 +274,7 @@ async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка стикеров для анти-спам системы"""
+    if not await check_private_chat(update, context): return
     chat_id, user_id = update.effective_chat.id, update.effective_user.id
     s = chat_settings.get(chat_id, {}).get("sticker_settings")
     if not s or not s["sticker_limit"]: return
@@ -236,6 +309,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сброс счетчика стикеров при отправке других сообщений"""
+    if not await check_private_chat(update, context): return
     chat_id, user_id = update.effective_chat.id, update.effective_user.id
     if chat_id in chat_settings and "sticker_settings" in chat_settings[chat_id]:
         c = chat_settings[chat_id]["sticker_settings"]["user_sticker_counter"]
@@ -247,6 +321,9 @@ async def post_init(app: Application):
 
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    
+    # Команда хелп
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^[!./]хелп$'), cmd_help))
     
     # Команды управления доступом
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\+бот'), cmd_grant_access))
