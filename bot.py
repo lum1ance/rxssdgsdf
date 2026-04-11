@@ -11,6 +11,7 @@ OWNER_ID = 7416252489
 allowed_users = {OWNER_ID}
 chat_settings = {}
 custom_rules_link = None
+admin_log = {}
 
 def parse_time(time_str: str) -> int | None:
     time_str = time_str.lower().strip()
@@ -28,6 +29,7 @@ def has_access(user_id: int) -> bool:
     return user_id in allowed_users
 
 async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдать доступ к командам бота"""
     if update.effective_user.id != OWNER_ID: return
     target_id, target_name = None, None
     if update.message.reply_to_message:
@@ -44,6 +46,7 @@ async def cmd_grant_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Не удалось определить пользователя")
 
 async def cmd_revoke_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отозвать доступ к командам бота"""
     if update.effective_user.id != OWNER_ID: return
     target_id, target_name = None, None
     if update.message.reply_to_message:
@@ -78,6 +81,7 @@ async def cmd_revoke_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"ℹ️ У {target_name} и так нет прав")
 
 async def cmd_set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Изменить ссылку в команде 'правила'"""
     if update.effective_user.id != OWNER_ID: return
     global custom_rules_link
     text = update.message.text.strip()
@@ -94,6 +98,7 @@ async def cmd_set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Ссылка на правила обновлена:\n{link}")
 
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удалить сообщения"""
     if not has_access(update.effective_user.id): return
     text, chat_id, cmd_id = update.message.text.strip(), update.effective_chat.id, update.message.message_id
     parts = text.split()
@@ -121,44 +126,15 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(0.05)
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверить задержку бота"""
     if not has_access(update.effective_user.id): return
     start = datetime.now()
     msg = await update.message.reply_text("...")
     end = datetime.now()
     await msg.edit_text(f"{(end - start).total_seconds() * 1000:.0f}ms")
 
-async def cmd_unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not has_access(update.effective_user.id): return
-    chat_id, text = update.effective_chat.id, update.message.text.strip()
-    target_id, target_name = None, None
-    if update.message.reply_to_message:
-        u = update.message.reply_to_message.from_user
-        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
-    elif update.message.entities:
-        for e in update.message.entities:
-            if e.type == "text_mention" and e.user:
-                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
-                break
-            elif e.type == "mention":
-                username = text[e.offset:e.offset + e.length].lstrip('@')
-                target_name = username
-                try: target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
-                except:
-                    try: target_id = (await context.bot.get_chat(f"@{username}")).id
-                    except: pass
-                break
-    if not target_id:
-        await update.message.reply_text("❌ Пользователь не указан или бот его не видит")
-        return
-    if not target_name: target_name = str(target_id)
-    try:
-        await context.bot.restrict_chat_member(chat_id, target_id,
-            permissions={"can_send_messages": True, "can_send_media": True, "can_send_other": True, "can_add_web_page_previews": True})
-        await update.message.reply_text(f"🔊 {target_name} размучен")
-    except:
-        await update.message.reply_text(f"❌ Не удалось размутить {target_name}")
-
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать правила"""
     link = custom_rules_link if custom_rules_link else "https://telegra.ph/Rules-01-24-146"
     await update.message.reply_text(
         f"Ознакомиться с правилами [тут]({link})",
@@ -167,6 +143,7 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установить лимит стикеров"""
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
     parts = update.message.text.strip().split()
@@ -181,6 +158,7 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"✅ Лимит стикеров установлен: {limit}")
 
 async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Настроить наказание за превышение лимита стикеров"""
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
     lines = update.message.text.strip().split('\n', 1)
@@ -204,13 +182,160 @@ async def cmd_trigger_stickers(update: Update, context: ContextTypes.DEFAULT_TYP
     else: await update.message.reply_text("❌ Укажите 'бан' или 'мут [время]'")
 
 async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать информацию о флуде"""
     await update.message.reply_text(
         "Ссылка на инфо [тут](https://t.me/lunacyyflood)",
         parse_mode=ParseMode.MARKDOWN,
         disable_web_page_preview=True
     )
 
+async def cmd_tgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдать админку в чате"""
+    if update.effective_user.id != OWNER_ID: return
+    chat_id = update.effective_chat.id
+    target_id, target_name = None, None
+    
+    if update.message.reply_to_message:
+        u = update.message.reply_to_message.from_user
+        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
+    elif update.message.entities:
+        text = update.message.text
+        for e in update.message.entities:
+            if e.type == "text_mention" and e.user:
+                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
+                break
+            elif e.type == "mention":
+                username = text[e.offset:e.offset + e.length].lstrip('@')
+                target_name = username
+                try:
+                    target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
+                except:
+                    try:
+                        target_id = (await context.bot.get_chat(f"@{username}")).id
+                    except:
+                        pass
+                break
+    
+    if not target_id:
+        await update.message.reply_text("❌ Не удалось определить пользователя")
+        return
+    
+    if not target_name:
+        target_name = str(target_id)
+    
+    try:
+        bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
+        if not bot_member.can_promote_members:
+            await update.message.reply_text("❌ У бота нет права назначать администраторов")
+            return
+    except:
+        await update.message.reply_text("❌ Бот не является администратором чата")
+        return
+    
+    try:
+        target_member = await context.bot.get_chat_member(chat_id, target_id)
+        if target_member.status in ["administrator", "creator"]:
+            await update.message.reply_text(f"ℹ️ {target_name} уже является администратором или создателем")
+            return
+    except:
+        pass
+    
+    try:
+        await context.bot.promote_chat_member(
+            chat_id=chat_id,
+            user_id=target_id,
+            can_manage_chat=True,
+            can_delete_messages=True,
+            can_manage_video_chats=False,
+            can_restrict_members=True,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=True,
+            can_post_messages=False,
+            can_edit_messages=False,
+            can_pin_messages=True,
+            can_manage_topics=False,
+            is_anonymous=False
+        )
+        
+        if chat_id not in admin_log:
+            admin_log[chat_id] = {}
+        admin_log[chat_id][target_id] = update.effective_user.id
+        
+        await update.message.reply_text(f"✅ {target_name} назначен администратором")
+        await context.bot.send_message(
+            OWNER_ID,
+            f"👑 {target_name} (ID: {target_id}) назначен админом в чате {chat_id}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Не удалось назначить админа: {str(e)[:100]}")
+
+async def cmd_untgadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Снять админку в чате"""
+    if update.effective_user.id != OWNER_ID: return
+    chat_id = update.effective_chat.id
+    target_id, target_name = None, None
+    
+    if update.message.reply_to_message:
+        u = update.message.reply_to_message.from_user
+        target_id, target_name = u.id, u.first_name or f"@{u.username}" or str(u.id)
+    elif update.message.entities:
+        text = update.message.text
+        for e in update.message.entities:
+            if e.type == "text_mention" and e.user:
+                target_id, target_name = e.user.id, e.user.first_name or f"@{e.user.username}" or str(e.user.id)
+                break
+            elif e.type == "mention":
+                username = text[e.offset:e.offset + e.length].lstrip('@')
+                target_name = username
+                try:
+                    target_id = (await context.bot.get_chat_member(chat_id, f"@{username}")).user.id
+                except:
+                    try:
+                        target_id = (await context.bot.get_chat(f"@{username}")).id
+                    except:
+                        pass
+                break
+    
+    if not target_id:
+        await update.message.reply_text("❌ Не удалось определить пользователя")
+        return
+    
+    if not target_name:
+        target_name = str(target_id)
+    
+    try:
+        target_member = await context.bot.get_chat_member(chat_id, target_id)
+        if target_member.status == "creator":
+            await update.message.reply_text("❌ Нельзя снять админку с создателя чата")
+            return
+        
+        await context.bot.promote_chat_member(
+            chat_id=chat_id,
+            user_id=target_id,
+            can_manage_chat=False,
+            can_delete_messages=False,
+            can_manage_video_chats=False,
+            can_restrict_members=False,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=False,
+            can_post_messages=False,
+            can_edit_messages=False,
+            can_pin_messages=False,
+            can_manage_topics=False,
+            is_anonymous=False
+        )
+        await update.message.reply_text(f"⬇️ {target_name} больше не администратор")
+        await context.bot.send_message(
+            OWNER_ID,
+            f"⬇️ {target_name} (ID: {target_id}) снят с админки в чате {chat_id}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Не удалось снять админку: {str(e)[:100]}")
+
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка стикеров для анти-спам системы"""
     chat_id, user_id = update.effective_chat.id, update.effective_user.id
     s = chat_settings.get(chat_id, {}).get("sticker_settings")
     if not s or not s["sticker_limit"]: return
@@ -244,6 +369,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
 
 async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сброс счетчика стикеров при отправке других сообщений"""
     chat_id, user_id = update.effective_chat.id, update.effective_user.id
     if chat_id in chat_settings and "sticker_settings" in chat_settings[chat_id]:
         c = chat_settings[chat_id]["sticker_settings"]["user_sticker_counter"]
@@ -255,21 +381,33 @@ async def post_init(app: Application):
 
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    
+    # Команды управления доступом
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\+бот'), cmd_grant_access))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^-бот'), cmd_revoke_access))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\+правила'), cmd_set_rules))
+    
+    # Команды администрирования
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!дел(\s+\d+)?$'), cmd_del))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!пинг$'), cmd_ping))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^анмут\b'), cmd_unmute))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!тгадмин'), cmd_tgadmin))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!антгадмин'), cmd_untgadmin))
+    
+    # Команды информации
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\+правила'), cmd_set_rules))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^правила$'), cmd_rules))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^-стикеры\s+\d+$'), cmd_stickers_limit))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^триггер стикеры'), cmd_trigger_stickers))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\.флуд инфо$'), cmd_flood_info))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^\.инфо флуд$'), cmd_flood_info))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!флуд инфо$'), cmd_flood_info))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!инфо флуд$'), cmd_flood_info))
+    
+    # Команды анти-стикер спама
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^-стикеры\s+\d+$'), cmd_stickers_limit))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^триггер стикеры'), cmd_trigger_stickers))
+    
+    # Обработчики сообщений
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
     app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.COMMAND, handle_other))
+    
     app.run_polling()
 
 if __name__ == "__main__":
