@@ -49,7 +49,7 @@ async def check_private_chat(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать список команд"""
     if is_private_chat(update) and not is_owner(update):
-        return  # В личке чужим не отвечаем, даже хелп не показываем
+        return
     
     user_id = update.effective_user.id
     is_admin = has_access(user_id)
@@ -223,10 +223,15 @@ async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try: limit = int(parts[2])
     except: return
     s = chat_settings.setdefault(chat_id, {}).setdefault("sticker_settings", {
-        "sticker_limit": None, "sticker_punishment": "mute", "sticker_punishment_duration": 3600, "user_sticker_counter": {}
+        "sticker_limit": None, 
+        "sticker_punishment": "mute", 
+        "sticker_punishment_duration": 3600, 
+        "sticker_counter": 0,
+        "last_sticker_user": None
     })
     s["sticker_limit"] = limit
-    s["user_sticker_counter"] = {}
+    s["sticker_counter"] = 0
+    s["last_sticker_user"] = None
     await update.message.reply_text(f"✅ Лимит стикеров установлен: {limit}")
 
 async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -243,7 +248,11 @@ async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_
     
     punishment = parts[1].strip()
     s = chat_settings.setdefault(chat_id, {}).setdefault("sticker_settings", {
-        "sticker_limit": None, "sticker_punishment": "mute", "sticker_punishment_duration": 3600, "user_sticker_counter": {}
+        "sticker_limit": None, 
+        "sticker_punishment": "mute", 
+        "sticker_punishment_duration": 3600, 
+        "sticker_counter": 0,
+        "last_sticker_user": None
     })
     
     if punishment.lower() == "бан":
@@ -273,47 +282,98 @@ async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка стикеров для анти-спам системы"""
+    """Обработка стикеров - бан за стикеры подряд от ЛЮБЫХ пользователей"""
     if not await check_private_chat(update, context): return
-    chat_id, user_id = update.effective_chat.id, update.effective_user.id
+    
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     s = chat_settings.get(chat_id, {}).get("sticker_settings")
-    if not s or not s["sticker_limit"]: return
-    c = s["user_sticker_counter"]
-    c[user_id] = c.get(user_id, 0) + 1
-    if c[user_id] >= s["sticker_limit"]:
-        c[user_id] = 0
+    
+    if not s or not s["sticker_limit"]:
+        return
+    
+    # Увеличиваем общий счётчик стикеров
+    s["sticker_counter"] = s.get("sticker_counter", 0) + 1
+    
+    # Сохраняем ID последнего отправителя стикера
+    s["last_sticker_user"] = user_id
+    
+    # Проверяем, не превышен ли лимит
+    if s["sticker_counter"] >= s["sticker_limit"]:
+        # Сбрасываем счётчик
+        s["sticker_counter"] = 0
+        target_user = s["last_sticker_user"]
+        s["last_sticker_user"] = None
+        
         try:
-            u = await context.bot.get_chat_member(chat_id, user_id)
-            name = u.user.first_name or f"@{u.user.username}" or str(user_id)
-        except: name = str(user_id)
+            u = await context.bot.get_chat_member(chat_id, target_user)
+            name = u.user.first_name or f"@{u.user.username}" or str(target_user)
+        except:
+            name = str(target_user)
+        
         if s["sticker_punishment"] == "ban":
             try:
-                await context.bot.ban_chat_member(chat_id, user_id)
-                await context.bot.send_message(chat_id, f"🚫 {name} забанен за {s['sticker_limit']} стикеров подряд")
-                await context.bot.send_message(OWNER_ID, f"🚫 {name} (ID: {user_id}) забанен в чате {chat_id} за {s['sticker_limit']} стикеров")
-            except: pass
+                await context.bot.ban_chat_member(chat_id, target_user)
+                await context.bot.send_message(
+                    chat_id, 
+                    f"🚫 {name} забанен за стикер-спам!"
+                )
+                await context.bot.send_message(
+                    OWNER_ID,
+                    f"🚫 {name} (ID: {target_user}) забанен в чате {chat_id} за стикер-спам"
+                )
+            except Exception as e:
+                await context.bot.send_message(
+                    OWNER_ID,
+                    f"❌ Не удалось забанить {name}: {str(e)[:100]}"
+                )
         else:
             dur = s["sticker_punishment_duration"]
             until = datetime.now() + timedelta(seconds=dur)
-            if dur >= 86400: td = f"{dur // 86400} дн."
-            elif dur >= 3600: td = f"{dur // 3600} ч."
-            elif dur >= 60: td = f"{dur // 60} мин."
-            else: td = f"{dur} сек."
+            if dur >= 86400:
+                td = f"{dur // 86400} дн."
+            elif dur >= 3600:
+                td = f"{dur // 3600} ч."
+            elif dur >= 60:
+                td = f"{dur // 60} мин."
+            else:
+                td = f"{dur} сек."
+            
             try:
-                await context.bot.restrict_chat_member(chat_id, user_id,
-                    permissions={"can_send_messages": False, "can_send_media": False, "can_send_other": False, "can_add_web_page_previews": False},
-                    until_date=until)
-                await context.bot.send_message(chat_id, f"🔇 {name} замучен на {td} за {s['sticker_limit']} стикеров подряд")
-                await context.bot.send_message(OWNER_ID, f"🔇 {name} (ID: {user_id}) замучен на {td} в чате {chat_id} за {s['sticker_limit']} стикеров")
-            except: pass
+                await context.bot.restrict_chat_member(
+                    chat_id, 
+                    target_user,
+                    permissions={
+                        "can_send_messages": False,
+                        "can_send_media": False,
+                        "can_send_other": False,
+                        "can_add_web_page_previews": False
+                    },
+                    until_date=until
+                )
+                await context.bot.send_message(
+                    chat_id,
+                    f"🔇 {name} замучен на {td} за стикер-спам!"
+                )
+                await context.bot.send_message(
+                    OWNER_ID,
+                    f"🔇 {name} (ID: {target_user}) замучен на {td} в чате {chat_id} за стикер-спам"
+                )
+            except Exception as e:
+                await context.bot.send_message(
+                    OWNER_ID,
+                    f"❌ Не удалось замутить {name}: {str(e)[:100]}"
+                )
 
 async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сброс счетчика стикеров при отправке других сообщений"""
     if not await check_private_chat(update, context): return
-    chat_id, user_id = update.effective_chat.id, update.effective_user.id
+    chat_id = update.effective_chat.id
     if chat_id in chat_settings and "sticker_settings" in chat_settings[chat_id]:
-        c = chat_settings[chat_id]["sticker_settings"]["user_sticker_counter"]
-        if user_id in c: c[user_id] = 0
+        s = chat_settings[chat_id]["sticker_settings"]
+        # Сбрасываем счётчик при любом НЕ стикере
+        s["sticker_counter"] = 0
+        s["last_sticker_user"] = None
 
 async def post_init(app: Application):
     await app.bot.set_my_commands([])
