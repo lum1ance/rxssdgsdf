@@ -69,10 +69,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_text += "`!дел 10` — удалить 10 последних сообщений\n"
         help_text += "`!пинг` — проверить задержку бота\n\n"
         
-        help_text += "🛡️ **Анти-стикер спам:**\n"
-        help_text += "`стикеры спам 5` — установить лимит стикеров\n"
-        help_text += "`стикеры бан` — бан за превышение лимита\n"
-        help_text += "`стикеры мут 15 минут` — мут за превышение\n\n"
+        help_text += "🛡️ **Анти-спам (стикеры/GIF):**\n"
+        help_text += "`спам 5` — установить лимит стикеров/GIF\n"
+        help_text += "`спам бан` — бан за превышение лимита\n"
+        help_text += "`спам мут 15 минут` — мут за превышение\n\n"
     
     # Команды только для владельца
     if is_owner_user:
@@ -213,29 +213,29 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-async def cmd_stickers_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Установить лимит стикеров"""
+async def cmd_spam_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установить лимит стикеров/GIF"""
     if not await check_private_chat(update, context): return
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
     parts = update.message.text.strip().split()
-    if len(parts) != 3: return
-    try: limit = int(parts[2])
+    if len(parts) != 2: return
+    try: limit = int(parts[1])
     except: return
-    s = chat_settings.setdefault(chat_id, {}).setdefault("sticker_settings", {
-        "sticker_limit": None, 
-        "sticker_punishment": "mute", 
-        "sticker_punishment_duration": 3600, 
-        "sticker_counter": 0,
-        "last_sticker_user": None
+    s = chat_settings.setdefault(chat_id, {}).setdefault("spam_settings", {
+        "spam_limit": None, 
+        "spam_punishment": "mute", 
+        "spam_punishment_duration": 3600, 
+        "spam_counter": 0,
+        "last_spam_user": None
     })
-    s["sticker_limit"] = limit
-    s["sticker_counter"] = 0
-    s["last_sticker_user"] = None
-    await update.message.reply_text(f"✅ Лимит стикеров установлен: {limit}")
+    s["spam_limit"] = limit
+    s["spam_counter"] = 0
+    s["last_spam_user"] = None
+    await update.message.reply_text(f"✅ Лимит стикеров/GIF установлен: {limit}")
 
-async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Настроить наказание за превышение лимита стикеров"""
+async def cmd_spam_punishment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Настроить наказание за превышение лимита"""
     if not await check_private_chat(update, context): return
     if not has_access(update.effective_user.id): return
     chat_id = update.effective_chat.id
@@ -247,24 +247,24 @@ async def cmd_stickers_punishment(update: Update, context: ContextTypes.DEFAULT_
         return
     
     punishment = parts[1].strip()
-    s = chat_settings.setdefault(chat_id, {}).setdefault("sticker_settings", {
-        "sticker_limit": None, 
-        "sticker_punishment": "mute", 
-        "sticker_punishment_duration": 3600, 
-        "sticker_counter": 0,
-        "last_sticker_user": None
+    s = chat_settings.setdefault(chat_id, {}).setdefault("spam_settings", {
+        "spam_limit": None, 
+        "spam_punishment": "mute", 
+        "spam_punishment_duration": 3600, 
+        "spam_counter": 0,
+        "last_spam_user": None
     })
     
     if punishment.lower() == "бан":
-        s["sticker_punishment"], s["sticker_punishment_duration"] = "ban", None
-        await update.message.reply_text("✅ Наказание за стикеры: бан")
+        s["spam_punishment"], s["spam_punishment_duration"] = "ban", None
+        await update.message.reply_text("✅ Наказание за спам: бан")
     elif punishment.lower().startswith("мут"):
         m = re.search(r"мут\s+(.+)", punishment, re.IGNORECASE)
         if m:
             sec = parse_time(m.group(1))
             if sec:
-                s["sticker_punishment"], s["sticker_punishment_duration"] = "mute", sec
-                await update.message.reply_text(f"✅ Наказание за стикеры: мут {m.group(1)}")
+                s["spam_punishment"], s["spam_punishment_duration"] = "mute", sec
+                await update.message.reply_text(f"✅ Наказание за спам: мут {m.group(1)}")
             else:
                 await update.message.reply_text("❌ Неверный формат времени")
         else:
@@ -281,29 +281,29 @@ async def cmd_flood_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка стикеров - бан за стикеры подряд от ЛЮБЫХ пользователей"""
+async def handle_spam_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка стикеров и GIF для анти-спам системы"""
     if not await check_private_chat(update, context): return
     
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    s = chat_settings.get(chat_id, {}).get("sticker_settings")
+    s = chat_settings.get(chat_id, {}).get("spam_settings")
     
-    if not s or not s["sticker_limit"]:
+    if not s or not s["spam_limit"]:
         return
     
-    # Увеличиваем общий счётчик стикеров
-    s["sticker_counter"] = s.get("sticker_counter", 0) + 1
+    # Увеличиваем общий счётчик
+    s["spam_counter"] = s.get("spam_counter", 0) + 1
     
-    # Сохраняем ID последнего отправителя стикера
-    s["last_sticker_user"] = user_id
+    # Сохраняем ID последнего отправителя
+    s["last_spam_user"] = user_id
     
     # Проверяем, не превышен ли лимит
-    if s["sticker_counter"] >= s["sticker_limit"]:
+    if s["spam_counter"] >= s["spam_limit"]:
         # Сбрасываем счётчик
-        s["sticker_counter"] = 0
-        target_user = s["last_sticker_user"]
-        s["last_sticker_user"] = None
+        s["spam_counter"] = 0
+        target_user = s["last_spam_user"]
+        s["last_spam_user"] = None
         
         try:
             u = await context.bot.get_chat_member(chat_id, target_user)
@@ -311,16 +311,16 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             name = str(target_user)
         
-        if s["sticker_punishment"] == "ban":
+        if s["spam_punishment"] == "ban":
             try:
                 await context.bot.ban_chat_member(chat_id, target_user)
                 await context.bot.send_message(
                     chat_id, 
-                    f"🚫 {name} забанен за стикер-спам!"
+                    f"🚫 {name} забанен за спам стикерами/GIF!"
                 )
                 await context.bot.send_message(
                     OWNER_ID,
-                    f"🚫 {name} (ID: {target_user}) забанен в чате {chat_id} за стикер-спам"
+                    f"🚫 {name} (ID: {target_user}) забанен в чате {chat_id} за спам стикерами/GIF"
                 )
             except Exception as e:
                 await context.bot.send_message(
@@ -328,7 +328,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"❌ Не удалось забанить {name}: {str(e)[:100]}"
                 )
         else:
-            dur = s["sticker_punishment_duration"]
+            dur = s["spam_punishment_duration"]
             until = datetime.now() + timedelta(seconds=dur)
             if dur >= 86400:
                 td = f"{dur // 86400} дн."
@@ -353,11 +353,11 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 await context.bot.send_message(
                     chat_id,
-                    f"🔇 {name} замучен на {td} за стикер-спам!"
+                    f"🔇 {name} замучен на {td} за спам стикерами/GIF!"
                 )
                 await context.bot.send_message(
                     OWNER_ID,
-                    f"🔇 {name} (ID: {target_user}) замучен на {td} в чате {chat_id} за стикер-спам"
+                    f"🔇 {name} (ID: {target_user}) замучен на {td} в чате {chat_id} за спам стикерами/GIF"
                 )
             except Exception as e:
                 await context.bot.send_message(
@@ -366,14 +366,14 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
 async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сброс счетчика стикеров при отправке других сообщений"""
+    """Сброс счетчика при отправке других сообщений"""
     if not await check_private_chat(update, context): return
     chat_id = update.effective_chat.id
-    if chat_id in chat_settings and "sticker_settings" in chat_settings[chat_id]:
-        s = chat_settings[chat_id]["sticker_settings"]
-        # Сбрасываем счётчик при любом НЕ стикере
-        s["sticker_counter"] = 0
-        s["last_sticker_user"] = None
+    if chat_id in chat_settings and "spam_settings" in chat_settings[chat_id]:
+        s = chat_settings[chat_id]["spam_settings"]
+        # Сбрасываем счётчик при любом НЕ стикере и НЕ GIF
+        s["spam_counter"] = 0
+        s["last_spam_user"] = None
 
 async def post_init(app: Application):
     await app.bot.set_my_commands([])
@@ -401,13 +401,15 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!флуд инфо$'), cmd_flood_info))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^!инфо флуд$'), cmd_flood_info))
     
-    # Команды анти-стикер спама
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^стикеры спам\s+\d+$'), cmd_stickers_limit))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^стикеры\s+(бан|мут)'), cmd_stickers_punishment))
+    # Команды анти-спама
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^спам\s+\d+$'), cmd_spam_limit))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'(?i)^спам\s+(бан|мут)'), cmd_spam_punishment))
     
-    # Обработчики сообщений
-    app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
-    app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.COMMAND, handle_other))
+    # Обработчики стикеров и GIF
+    app.add_handler(MessageHandler(filters.Sticker.ALL | filters.ANIMATION, handle_spam_content))
+    
+    # Обработчик остальных сообщений (сброс счётчика)
+    app.add_handler(MessageHandler(~filters.Sticker.ALL & ~filters.ANIMATION & ~filters.COMMAND, handle_other))
     
     app.run_polling()
 
